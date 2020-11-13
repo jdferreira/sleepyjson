@@ -24,7 +24,7 @@ SIMPLE_DETERMINANTS = [
 ]
 
 COMPLEX_DETERMINANTS = [
-    ('0123456789.', NodeType.NUMBER),
+    ('0123456789.-', NodeType.NUMBER),
 ]
 
 WHITESPACE = '\r\n\t '
@@ -60,8 +60,6 @@ class Node:
                 raise ValueError('Nodes cannot be empty')
             else:
                 break
-
-
 
         buf = self.peek(MAX_NEEDED_CHARS)
 
@@ -168,3 +166,23 @@ def parse_string(file: TextIO, pos: int):
     accumulated.append(buf[:quote_pos])
 
     return eval('"' + ''.join(accumulated) + '"')
+
+
+def parse_number(file: TextIO, pos: int):
+    # Grab all valid number characters and parse the result
+
+    accumulated = []
+
+    while True:
+        c = file.read(1)
+
+        if c == '':
+            break
+        elif c in '-+0123456789eE.':
+            accumulated.append(c)
+        else:
+            break
+
+    accumulated = ''.join(accumulated)
+
+    return float(accumulated)
