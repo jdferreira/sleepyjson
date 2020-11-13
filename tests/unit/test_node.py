@@ -21,7 +21,6 @@ def test_nodes_know_their_type():
     assert create_node('false', 0).is_false()
     assert create_node('true', 0).is_boolean()
     assert create_node('null', 0).is_null()
-    assert create_node('// Comment', 0).is_comment()
 
     with pytest.raises(ValueError):
         assert create_node('undefined', 0)

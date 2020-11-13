@@ -12,14 +12,12 @@ class NodeType(Enum):
     TRUE = auto()
     FALSE = auto()
     NULL = auto()
-    COMMENT = auto()
 
 
 SIMPLE_DETERMINANTS = [
     ('{', NodeType.OBJECT),
     ('[', NodeType.ARRAY),
     ('"', NodeType.STRING),
-    ('//', NodeType.COMMENT),
     ('true', NodeType.TRUE),
     ('false', NodeType.FALSE),
     ('null', NodeType.NULL),
@@ -35,6 +33,7 @@ WHITESPACE = '\r\n\t '
 # node's type
 MAX_NEEDED_CHARS = 5
 
+
 class Node:
     def __init__(self, file: TextIO, pos: int):
         self.file = file
@@ -47,24 +46,22 @@ class Node:
 
         self.type = self.get_type()
 
+    def peek(self, n):
+        result = self.file.read(n)
+
+        self.file.seek(self.pos)
+
+        return result
+
     def get_type(self):
         # Consume whitespace
         while True:
-            self.file.seek(self.pos)
-
-            c = self.file.read(1)
-            self.file.seek(self.pos)
-            print(f'Reading: {c!r}')
-
-            if c == '':
+            if self.peek(1) == '':
                 raise ValueError('Nodes cannot be empty')
-            elif c in WHITESPACE:
-                self.pos += 1
             else:
                 break
 
-        buf = self.file.read(MAX_NEEDED_CHARS)
-        print(f'buf = {buf!r}')
+        buf = self.peek(MAX_NEEDED_CHARS)
 
         for prefix, node_type in SIMPLE_DETERMINANTS:
             if buf.startswith(prefix):
@@ -99,9 +96,6 @@ class Node:
 
     def is_null(self):
         return self.type == NodeType.NULL
-
-    def is_comment(self):
-        return self.type == NodeType.COMMENT
 
     def is_array(self):
         return self.type == NodeType.ARRAY
