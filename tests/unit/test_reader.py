@@ -28,8 +28,8 @@ def sample():
     return Reader(io.StringIO(TEST_CONTENT))
 
 
-def test_innards_are_nodes(sample):
-    assert isinstance(sample['a'], Node)
+def test_readers_are_nodes(sample):
+    assert isinstance(sample, Node)
 
 
 # def test_fails_on_non_existing_keys(sample):
