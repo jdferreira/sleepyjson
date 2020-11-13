@@ -61,6 +61,8 @@ class Node:
             else:
                 break
 
+
+
         buf = self.peek(MAX_NEEDED_CHARS)
 
         for prefix, node_type in SIMPLE_DETERMINANTS:
@@ -101,4 +103,68 @@ class Node:
         return self.type == NodeType.ARRAY
 
     def value(self):
-        pass
+        if self.type == NodeType.TRUE:
+            return True
+        elif self.type == NodeType.FALSE:
+            return False
+        elif self.type == NodeType.NULL:
+            return None
+        elif self.type == NodeType.STRING:
+            return parse_string(self.file, self.pos)
+        elif self.type == NodeType.NUMBER:
+            return parse_number(self.file, self.pos)
+
+
+def parse_string(file: TextIO, pos: int):
+    # Repeat this:
+    # - Read a bunch characters
+    # - If 0 characters were returned, the string did not end... Raise
+    #   exception
+    # - Repeat this:
+    #   - Look for the first occurrence of a "\n" or a quote
+    #   - If we found a "\n", the string is not properly finished. Raise
+    #     exception
+    #   - If it is a non-escaped quote, we found the end of the string!
+    #     Return
+
+    file.seek(pos + 1)  # Skip the start quote
+
+    accumulated = []
+
+    while True:
+        buf = file.read(1024)  # This buffers starts as with the quote
+
+        if len(buf) == 0:
+            raise ValueError('The string does not terminate')
+
+        quote_pos = 0
+        while True:
+            quote_pos = buf.find('"', quote_pos)
+
+            if quote_pos == -1:
+                break
+            elif buf[quote_pos - 1] == '\\':
+                # Skip this quote
+                quote_pos += 1
+
+                continue
+            else:
+                break
+
+        if quote_pos == -1:
+            # We did not find a quote, so we need to search longer
+            if '\n' in buf:
+                raise ValueError('End of line while scanning string')
+
+            accumulated.append(buf)
+            continue
+
+        break
+
+    if '\n' in buf[:quote_pos]:
+        raise ValueError('End of line while scanning string')
+
+    # We now have a string
+    accumulated.append(buf[:quote_pos])
+
+    return eval('"' + ''.join(accumulated) + '"')
