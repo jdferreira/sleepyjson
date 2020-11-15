@@ -1,71 +1,107 @@
 import io
 
 import pytest
-from lazyjson.node import Node, parse_string, parse_number
+from lazyjson.node import Node, measure_string, measure_number
 
 
-def create_node(content, pos):
+def create_node(content, pos=0):
     return Node(io.StringIO(content), pos)
 
 
-def test_nodes_need_files_and_positions():
-    create_node('[]', 0)
+def test_nodes_need_characters():
+    with pytest.raises(ValueError):
+        create_node('')
+
+    with pytest.raises(ValueError):
+        create_node('[]', 2)
 
 
 def test_nodes_know_their_type():
-    assert create_node('{}', 0).is_object()
-    assert create_node('[]', 0).is_array()
-    assert create_node('""', 0).is_string()
-    assert create_node('12', 0).is_number()
-    assert create_node('true', 0).is_true()
-    assert create_node('false', 0).is_false()
-    assert create_node('true', 0).is_boolean()
-    assert create_node('null', 0).is_null()
+    assert create_node('{}').is_object()
+    assert create_node('[]').is_array()
+    assert create_node('""').is_string()
+    assert create_node('12').is_number()
+    assert create_node('true').is_true()
+    assert create_node('false').is_false()
+    assert create_node('true').is_boolean()
+    assert create_node('null').is_null()
 
     with pytest.raises(ValueError):
-        assert create_node('undefined', 0)
+        assert create_node('undefined')
 
 
 def test_simple_nodes_can_consume_their_content():
-    assert create_node('true', 0).value() == True
-    assert create_node('false', 0).value() == False
-    assert create_node('null', 0).value() == None
-    assert create_node('""', 0).value() == ''
-    assert create_node('12', 0).value() == 12
+    assert create_node('true').value() == True
+    assert create_node('false').value() == False
+    assert create_node('null').value() == None
+    assert create_node('""').value() == ''
+    assert create_node('12').value() == 12
 
 
-def test_parse_string():
-    def parse(text):
-        return parse_string(io.StringIO(text), 0)
+def test_measure_string():
+    def measure(text):
+        return measure_string(io.StringIO(text), 0)
 
-    assert parse('"abc"') == 'abc'
-    assert parse('""') == ''
-    assert parse('"\\""') == '"'
-    assert parse('"He said \\"Watch out\\"!"') == 'He said "Watch out"!'
-
-    with pytest.raises(ValueError):
-        parse('"')
+    assert measure('"abc"') == 5
+    assert measure('""') == 2
+    assert measure('"\\""') == 4
+    assert measure('"He said \\"Watch out\\"!"') == 24
 
     with pytest.raises(ValueError):
-        parse('"New \n line"')
-
-
-def test_parse_number():
-    def parse(text):
-        return parse_number(io.StringIO(text), 0)
-
-    assert parse('3.14') == 3.14
-    assert parse('1000') == 1000
-    assert parse('-666') == -666
-    assert parse('5e-8') == 5e-8
-    assert parse('.123') == 0.123
-    assert parse('1.1e1') == 11
+        measure('"')
 
     with pytest.raises(ValueError):
-        parse('1+2')
+        measure('"New \n line"')
+
+
+def test_measure_number():
+    def measure(text):
+        return measure_number(io.StringIO(text), 0)
+
+    assert measure('3.14') == 4
+    assert measure('1000') == 4
+    assert measure('-666') == 4
+    assert measure('5e-8') == 4
+    assert measure('0.12') == 4
+    assert measure('1.1e1') == 5
+
+    # Numbers followed by other stuff
+    assert measure('1+2') == 1
+    assert measure('1e-5e') == 4
+    assert measure('0123') == 1
 
     with pytest.raises(ValueError):
-        parse('.3.8')
+        measure('.3.8')
 
     with pytest.raises(ValueError):
-        parse('1e-5e')
+        measure('.123')
+
+
+def test_nodes_know_where_they_end():
+    test_content = '{"a": [1, true, false, null]}'
+
+    test_cases = [
+        (0, '{"a": [1, true, false, null]}'),
+        (1, '"a"'),
+        (6, '[1, true, false, null]'),
+        (7, '1'),
+        (10, 'true'),
+        (16, 'false'),
+        (23, 'null'),
+    ]
+
+    for i, value_repr in test_cases:
+        node = create_node(test_content, i)
+
+        assert node.compute_value_length() == len(value_repr)
+
+
+def test_object_nodes_can_be_indexed():
+    node = create_node('{"a": 123}')
+
+    assert isinstance(node['a'], Node)
+    assert node['a'].is_number()
+    assert node['a'].value() == 123
+
+    with pytest.raises(ValueError):
+        create_node('""')['a']

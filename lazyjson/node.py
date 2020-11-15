@@ -1,7 +1,23 @@
 from __future__ import annotations
 from enum import Enum, auto
+import re
 
 from typing import TextIO
+
+NUMBER_REGEX = re.compile(
+    r'''
+        ^                       # The beginning of the string
+        -?                      # Optional negative sign
+        (?: 0 | [1-9]\d* )      # The integral part, which cannot be empty and
+                                # cannot start with 0, unless it is exactly 0
+        (?: \.\d+ )?            # The optional fractional part
+        (?: [eE] [+-]? \d+ )?   # The optional exponent
+
+        # We don't test the end of the string because we need to know where a
+        # valid number ends
+    ''',
+    re.VERBOSE
+)
 
 
 class NodeType(Enum):
@@ -24,7 +40,7 @@ SIMPLE_DETERMINANTS = [
 ]
 
 COMPLEX_DETERMINANTS = [
-    ('0123456789.-', NodeType.NUMBER),
+    ('0123456789-', NodeType.NUMBER),
 ]
 
 WHITESPACE = '\r\n\t '
@@ -44,24 +60,25 @@ class Node:
 
         # TODO: Ensure the file is opened in binary mode!
 
+        self.reset_file()
+
         self.type = self.get_type()
+
+    def reset_file(self):
+        self.file.seek(self.pos)
 
     def peek(self, n):
         result = self.file.read(n)
 
-        self.file.seek(self.pos)
+        self.reset_file()
 
         return result
 
     def get_type(self):
-        # Consume whitespace
-        while True:
-            if self.peek(1) == '':
-                raise ValueError('Nodes cannot be empty')
-            else:
-                break
-
         buf = self.peek(MAX_NEEDED_CHARS)
+
+        if not buf:
+            raise ValueError('Unexpected end of file')
 
         for prefix, node_type in SIMPLE_DETERMINANTS:
             if buf.startswith(prefix):
@@ -71,7 +88,7 @@ class Node:
             if any(buf.startswith(c) for c in options):
                 return node_type
 
-        raise ValueError('Node received unexpected input')
+        raise ValueError(f'Unexpected input: {buf[0]}')
 
     def is_object(self):
         return self.type == NodeType.OBJECT
@@ -108,12 +125,82 @@ class Node:
         elif self.type == NodeType.NULL:
             return None
         elif self.type == NodeType.STRING:
-            return parse_string(self.file, self.pos)
+            return self.parse_string()
         elif self.type == NodeType.NUMBER:
-            return parse_number(self.file, self.pos)
+            return self.parse_number()
+
+    def compute_value_length(self):
+        try:
+            if self.type == NodeType.TRUE:
+                return 4
+            elif self.type == NodeType.FALSE:
+                return 5
+            elif self.type == NodeType.NULL:
+                return 4
+            elif self.type == NodeType.STRING:
+                return measure_string(self.file, self.pos)
+            elif self.type == NodeType.NUMBER:
+                return measure_number(self.file, self.pos)
+        finally:
+            self.reset_file()
+
+    # def __getitem__(self, key):
+    #     if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
+    #         raise ValueError(f'Cannot index objects of type {self.type}')
+
+    #     # We need to find the position where the requested object starts. In the
+    #     # mean time, we must cache the position of any item we find.
+
+    #     if self.type == NodeType.ARRAY:
+
+    def parse_string(self):
+        string = self.peek(self.compute_value_length())
+
+        parts = []
+
+        prev = 1
+        while True:
+            backslash = string.find('\\', prev)
+
+            if backslash == -1:
+                parts.append(string[prev:-1])
+                break
+
+            parts.append(string[prev:backslash])
+
+            next_char = string[backslash + 1]
+
+            MAP = {
+                '"' : '"',
+                '\\': '\\',
+                '/': '/',
+                'b': '\b',
+                'f': '\f',
+                'n': '\n',
+                'r': '\r',
+                't': '\t',
+            }
+
+            escaped = MAP.get(next_char, None)
+
+            if escaped is not None:
+                parts.append(escaped)
+            elif next_char == 'u':
+                codepoint = int(string[backslash + 2:backslash + 6], 16)
+                parts.append(chr(codepoint))
+            else:
+                raise ValueError(f'Unknown escaped sequence: \\{next_char}')
+
+        return ''.join(parts)
 
 
-def parse_string(file: TextIO, pos: int):
+    def parse_number(self):
+        string = self.peek(self.compute_value_length())
+
+        return float(string)
+
+
+def measure_string(file: TextIO, pos: int):
     # Repeat this:
     # - Read a bunch characters
     # - If 0 characters were returned, the string did not end... Raise
@@ -125,12 +212,12 @@ def parse_string(file: TextIO, pos: int):
     #   - If it is a non-escaped quote, we found the end of the string!
     #     Return
 
-    file.seek(pos + 1)  # Skip the start quote
-
-    accumulated = []
+    # Skip the start quote
+    file.seek(pos + 1)
+    result = 1
 
     while True:
-        buf = file.read(1024)  # This buffers starts as with the quote
+        buf = file.read(1024)
 
         if len(buf) == 0:
             raise ValueError('The string does not terminate')
@@ -154,7 +241,7 @@ def parse_string(file: TextIO, pos: int):
             if '\n' in buf:
                 raise ValueError('End of line while scanning string')
 
-            accumulated.append(buf)
+            result += len(buf)
             continue
 
         break
@@ -162,18 +249,21 @@ def parse_string(file: TextIO, pos: int):
     if '\n' in buf[:quote_pos]:
         raise ValueError('End of line while scanning string')
 
-    # We now have a string
-    accumulated.append(buf[:quote_pos])
+    # We must include the quote in the length of the string
+    result += quote_pos + 1
 
-    return eval('"' + ''.join(accumulated) + '"')
+    return result
 
 
-def parse_number(file: TextIO, pos: int):
+def measure_number(file: TextIO, pos: int):
     # Grab all valid number characters and parse the result
 
     accumulated = []
 
     while True:
+        # TODO: I must ensure that the file is actually buffered, or else this
+        # line, reading one character at a time, will take an unnecessary long
+        # time to run
         c = file.read(1)
 
         if c == '':
@@ -185,4 +275,11 @@ def parse_number(file: TextIO, pos: int):
 
     accumulated = ''.join(accumulated)
 
-    return float(accumulated)
+    m = NUMBER_REGEX.match(accumulated)
+
+    if m is None:
+        raise ValueError(
+            f'Number starts with a wrong character {accumulated[0]}'
+        )
+
+    return m.end()

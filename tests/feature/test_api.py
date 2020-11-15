@@ -62,7 +62,7 @@ def test_type(sample):
     assert sample['c'][0].is_boolean()
     assert sample['c'][1].is_boolean()
 
-    assert sample['d'][0].is_number()object
+    assert sample['d'][0].is_number()
 
     assert sample['e'].is_string()
 
