@@ -96,6 +96,19 @@ def test_nodes_know_where_they_end():
         assert node.compute_value_length() == len(value_repr)
 
 
+def test_array_nodes_can_be_indexed():
+    node = create_node('[1, 23, 456]')
+
+    assert isinstance(node[0], Node)
+    assert node[0].is_number()
+    assert node[0].value() == 1
+    assert node[1].value() == 23
+    assert node[2].value() == 456
+
+    with pytest.raises(ValueError):
+        create_node('{}')[0]
+
+
 def test_object_nodes_can_be_indexed():
     node = create_node('{"a": 123}')
 

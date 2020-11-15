@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum, auto
 import re
 
-from typing import TextIO
+from typing import Dict, List, TextIO, Union
 
 NUMBER_REGEX = re.compile(
     r'''
@@ -51,28 +51,72 @@ MAX_NEEDED_CHARS = 5
 
 
 class Node:
+    children_nodes: Union[List[Node], Dict[str, Node]]
+
     def __init__(self, file: TextIO, pos: int):
         self.file = file
-        self.pos = pos
 
         if not file.seekable():
             raise ValueError('Nodes need to be able to seek into the files')
 
         # TODO: Ensure the file is opened in binary mode!
 
-        self.reset_file()
+        self.skip_to_start(pos)
 
         self.type = self.get_type()
 
-    def reset_file(self):
-        self.file.seek(self.pos)
+        if self.type == NodeType.ARRAY:
+            self.children_nodes = []
+        elif self.type == NodeType.OBJECT:
+            self.children_nodes = {}
+
+    def skip_to_start(self, pos):
+        self.file.seek(pos)
+
+        self.skip_skippable()
+
+        self.pos = self.file.tell()
+
+    def skip_skippable(self):
+        in_comment = False
+
+        while True:
+            c = self.file.read(1)
+
+            if c == '':
+                raise ValueError('Unexpected end of file')
+
+            if in_comment:
+                if c == '\n':
+                    in_comment = False
+                continue
+
+            if c in WHITESPACE:
+                continue
+
+            if c == '/' and self.file.read(1) == '/':
+                in_comment = True
+
+                continue
+
+            break
+
+        self.file.seek(self.file.tell() - 1)
+
+    def skip_comma(self):
+        self.skip_skippable()
+
+        if self.file.read(1) == ',':
+            self.skip_skippable()
+
+            return True
+        else:
+            return False
 
     def peek(self, n):
-        result = self.file.read(n)
+        self.file.seek(self.pos)
 
-        self.reset_file()
-
-        return result
+        return self.file.read(n)
 
     def get_type(self):
         buf = self.peek(MAX_NEEDED_CHARS)
@@ -130,28 +174,61 @@ class Node:
             return self.parse_number()
 
     def compute_value_length(self):
-        try:
-            if self.type == NodeType.TRUE:
-                return 4
-            elif self.type == NodeType.FALSE:
-                return 5
-            elif self.type == NodeType.NULL:
-                return 4
-            elif self.type == NodeType.STRING:
-                return measure_string(self.file, self.pos)
-            elif self.type == NodeType.NUMBER:
-                return measure_number(self.file, self.pos)
-        finally:
-            self.reset_file()
+        if self.type == NodeType.TRUE:
+            return 4
+        elif self.type == NodeType.FALSE:
+            return 5
+        elif self.type == NodeType.NULL:
+            return 4
+        elif self.type == NodeType.STRING:
+            return measure_string(self.file, self.pos)
+        elif self.type == NodeType.NUMBER:
+            return measure_number(self.file, self.pos)
+        # elif self.type == NodeType.ARRAY:
+        #     return ...
 
-    # def __getitem__(self, key):
-    #     if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
-    #         raise ValueError(f'Cannot index objects of type {self.type}')
+    def __getitem__(self, key):
+        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
+            raise ValueError(f'Cannot index values of type {self.type}')
 
-    #     # We need to find the position where the requested object starts. In the
-    #     # mean time, we must cache the position of any item we find.
+        if self.type == NodeType.ARRAY:
+            if not isinstance(key, int):
+                raise ValueError(f'Can only index arrays with integers, not {type(key)}')
 
-    #     if self.type == NodeType.ARRAY:
+            if key < 0:
+                # TODO: This limitation could be removed if we first parse all children and
+                # then interpret the negative index the normal python way
+                raise ValueError('Can only retrieve items with a positive index')
+
+            cs = self.children_nodes
+
+            if key < len(cs):
+                return cs[key]
+
+            if not cs:
+                self.file.seek(self.pos + 1)
+            else:
+                self.file.seek(cs[-1].pos + cs[-1].compute_value_length())
+
+                if not self.skip_comma():
+                    raise ValueError(f'Array only has {len(cs)} children')
+
+            while True:
+                child = Node(self.file, self.file.tell())
+
+                cs.append(child)
+
+                if len(cs) == key + 1:
+                    return child
+
+                self.file.seek(child.pos + child.compute_value_length())
+
+                if not self.skip_comma():
+                    raise ValueError(f'Array only has {len(cs)} children')
+
+        elif self.type == NodeType.OBJECT:
+            if not isinstance(key, str):
+                raise ValueError(f'Can only index objects with strings, not {type(key)}')
 
     def parse_string(self):
         string = self.peek(self.compute_value_length())
@@ -257,6 +334,8 @@ def measure_string(file: TextIO, pos: int):
 
 def measure_number(file: TextIO, pos: int):
     # Grab all valid number characters and parse the result
+
+    file.seek(pos)
 
     accumulated = []
 
