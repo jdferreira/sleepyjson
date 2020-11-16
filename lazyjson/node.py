@@ -51,7 +51,7 @@ MAX_NEEDED_CHARS = 5
 
 
 class Node:
-    children_nodes: Union[List[Node], Dict[str, Node]]
+    children: Union[List[Node], Dict[str, Node]]
 
     def __init__(self, file: TextIO, pos: int):
         self.file = file
@@ -66,9 +66,11 @@ class Node:
         self.type = self.get_type()
 
         if self.type == NodeType.ARRAY:
-            self.children_nodes = []
+            self.children = []
+            self.size = None
         elif self.type == NodeType.OBJECT:
-            self.children_nodes = {}
+            self.children = {}
+            self.size = None
 
     def skip_to_start(self, pos):
         self.file.seek(pos)
@@ -106,7 +108,9 @@ class Node:
     def skip_comma(self):
         self.skip_skippable()
 
-        if self.file.read(1) == ',':
+        if self.peek(1) == ',':
+            self.file.read(1)
+
             self.skip_skippable()
 
             return True
@@ -114,11 +118,17 @@ class Node:
             return False
 
     def peek(self, n):
-        self.file.seek(self.pos)
+        pos = self.file.tell()
 
-        return self.file.read(n)
+        result = self.file.read(n)
+
+        self.file.seek(pos)
+
+        return result
 
     def get_type(self):
+        self.file.seek(self.pos)
+
         buf = self.peek(MAX_NEEDED_CHARS)
 
         if not buf:
@@ -187,6 +197,58 @@ class Node:
         # elif self.type == NodeType.ARRAY:
         #     return ...
 
+    def read_array_children_up_to(self, amount: Union[int, None]):
+        if self.type != NodeType.ARRAY:
+            raise ValueError(f'Cannot consume array items on a value of type {self.type}')
+
+        # If we already know the size of this array, either do nothing or raise
+        # if the requested size is too large
+        if self.size is not None:
+            if amount is None or amount <= self.size:
+                return
+            else:
+                raise IndexError('Array index out of range')
+
+        # If we already know the necessary amount of children, do nothing
+        if amount is not None and amount <= len(self.children):
+            return
+
+        # Position the file cursor on the start of the next child
+        if len(self.children) == 0:
+            self.file.seek(self.pos + 1)
+
+            self.skip_skippable()
+        else:
+            self.file.seek(self.children[-1].pos + self.children[-1].compute_value_length())
+
+            if not self.skip_comma() and amount is not None:
+                raise IndexError('Array index out of range')
+
+        # Keep reading children until we get to the one we want or we find the
+        # end of the JSON array
+        while True:
+            if self.peek(1) == ']':
+                self.size = len(self.children)
+
+                if amount is None:
+                    return
+                else:
+                    raise IndexError('Array index out of range')
+
+            child = Node(self.file, self.file.tell())
+
+            self.children.append(child)
+
+            if len(self.children) == amount:
+                # We have found as many children as requested; in this case
+                # there is no need to find out the length of this child
+                return
+
+            self.file.seek(child.pos + child.compute_value_length())
+
+            if not self.skip_comma() and amount is not None:
+                raise IndexError('Array index out of range')
+
     def __getitem__(self, key):
         if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
             raise ValueError(f'Cannot index values of type {self.type}')
@@ -196,41 +258,30 @@ class Node:
                 raise ValueError(f'Can only index arrays with integers, not {type(key)}')
 
             if key < 0:
-                # TODO: This limitation could be removed if we first parse all children and
-                # then interpret the negative index the normal python way
-                raise ValueError('Can only retrieve items with a positive index')
-
-            cs = self.children_nodes
-
-            if key < len(cs):
-                return cs[key]
-
-            if not cs:
-                self.file.seek(self.pos + 1)
+                self.read_array_children_up_to(None)
             else:
-                self.file.seek(cs[-1].pos + cs[-1].compute_value_length())
+                self.read_array_children_up_to(key + 1)
 
-                if not self.skip_comma():
-                    raise ValueError(f'Array only has {len(cs)} children')
-
-            while True:
-                child = Node(self.file, self.file.tell())
-
-                cs.append(child)
-
-                if len(cs) == key + 1:
-                    return child
-
-                self.file.seek(child.pos + child.compute_value_length())
-
-                if not self.skip_comma():
-                    raise ValueError(f'Array only has {len(cs)} children')
+            return self.children[key]
 
         elif self.type == NodeType.OBJECT:
             if not isinstance(key, str):
                 raise ValueError(f'Can only index objects with strings, not {type(key)}')
 
+    def __len__(self):
+        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
+            raise ValueError(f'Cannot measure the length of values of type {self.type}')
+
+        if self.type == NodeType.ARRAY:
+            self.read_array_children_up_to(None)
+        elif self.type == NodeType.OBJECT:
+            pass
+
+        return len(self.children)
+
     def parse_string(self):
+        self.file.seek(self.pos)
+
         string = self.peek(self.compute_value_length())
 
         parts = []
@@ -272,7 +323,11 @@ class Node:
 
 
     def parse_number(self):
-        string = self.peek(self.compute_value_length())
+        length = self.compute_value_length()
+
+        self.file.seek(self.pos)
+
+        string = self.peek(length)
 
         return float(string)
 
@@ -291,6 +346,7 @@ def measure_string(file: TextIO, pos: int):
 
     # Skip the start quote
     file.seek(pos + 1)
+
     result = 1
 
     while True:

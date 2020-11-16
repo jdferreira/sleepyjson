@@ -105,8 +105,32 @@ def test_array_nodes_can_be_indexed():
     assert node[1].value() == 23
     assert node[2].value() == 456
 
+    assert node[-1].value() == 456
+    assert node[-2].value() == 23
+    assert node[-3].value() == 1
+
     with pytest.raises(ValueError):
         create_node('{}')[0]
+
+    with pytest.raises(IndexError):
+        create_node('[]')[0]
+
+    with pytest.raises(IndexError):
+        create_node('[]')[-1]
+
+
+def test_array_nodes_have_a_length():
+    assert len(create_node('[]')) == 0
+    assert len(create_node('[1]')) == 1
+    assert len(create_node('[1, 2]')) == 2
+    assert len(create_node('[1, 2, "abc"]')) == 3
+
+
+def test_arrays_can_have_trailing_comma():
+    assert len(create_node('[1]')) == 1
+    assert len(create_node('[1,]')) == 1
+    assert len(create_node('[1, ]')) == 1
+    assert len(create_node('[ 1 , ]')) == 1
 
 
 def test_object_nodes_can_be_indexed():
