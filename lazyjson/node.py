@@ -174,7 +174,7 @@ class Node:
             if any(buf[0] == c for c in options):
                 return node_type
 
-        raise ValueError(f'Unexpected input: {buf[0]}')
+        raise ValueError(f'Unexpected input: {buf[:10]}')
 
     def is_object(self):
         return self.type == NodeType.OBJECT
@@ -243,141 +243,146 @@ class Node:
 
             return self.end - self.pos
 
-    def read_array_children_up_to(self, amount: Union[int, None]):
-        if self.type != NodeType.ARRAY:
-            raise ValueError(
-                f'Cannot consume array items on a value of type {self.type}'
-            )
+    def end_position(self):
+        if self.type == NodeType.ARRAY:
+            self.read_array_children_up_to(None)
 
-        # If we already know the size of this array, either do nothing or raise
-        # if the requested size is too large
-        if self.size is not None:
-            if amount is None or amount <= self.size:
-                return
-            else:
-                raise IndexError('Array index out of range')
+            return self.end
+        elif self.type == NodeType.OBJECT:
+            self.read_object_children_up_to(None)
 
-        # If we already know the necessary amount of children, do nothing
-        if amount is not None and amount <= len(self.children):
-            return
+            return self.end
+        else:
+            return self.pos + self.compute_value_length()
 
-        # Position the file cursor on the start of the next child
+    def seek_next_child(self, expecting_next):
         if len(self.children) == 0:
             self.file.seek(self.pos + 1)
 
             self.skip_skippable()
         else:
-            child = self.children[-1]
+            if self.type == NodeType.ARRAY:
+                child = self.children[-1]
+            else:
+                child = self.children[self.last_key]
 
-            self.file.seek(child.pos + child.compute_value_length())
+            self.file.seek(child.end_position())
 
-            if not self.skip_comma() and amount is not None:
+            if not self.skip_comma() and expecting_next:
+                if self.type == NodeType.ARRAY:
+                    raise IndexError('Array index out of range')
+                else:
+                    raise KeyError('Key not found')
+
+    def read_next_array_child(self, expecting_next) -> Union[None, Node]:
+        # If we already know the size of the array, there are no more items
+        if self.size is not None:
+            if expecting_next:
                 raise IndexError('Array index out of range')
+            else:
+                return None
+
+        self.seek_next_child(expecting_next)
+
+        if self.peek(1) == b']':
+            self.size = len(self.children)
+
+            self.end = self.file.tell() + 1
+
+            if expecting_next:
+                raise IndexError('Array index out of range')
+            else:
+                return None
+
+        child = Node(self.file, self.file.tell())
+
+        self.children.append(child)
+
+        return child
+
+    def read_array_children_up_to(self, amount: Union[int, None]):
+        # If we already know the necessary amount of children, do nothing
+        if amount is not None and amount <= len(self.children):
+            return
 
         # Keep reading children until we get to the one we want or we find the
         # end of the JSON array
         while True:
-            if self.peek(1) == b']':
-                self.size = len(self.children)
+            child = self.read_next_array_child(amount is not None)
 
-                self.end = self.file.tell() + 1
-
-                if amount is None:
-                    return
-                else:
-                    raise IndexError('Array index out of range')
-
-            child = Node(self.file, self.file.tell())
-
-            self.children.append(child)
+            if amount is None and child is None:
+                # We have successfully read all children
+                return
 
             if len(self.children) == amount:
                 # We have found as many children as requested; in this case
                 # there is no need to find out the length of this child
                 return
 
-            self.file.seek(child.pos + child.compute_value_length())
-
-            if not self.skip_comma() and amount is not None:
-                raise IndexError('Array index out of range')
-
     def read_object_children_up_to(self, key: Union[str, None]):
-        if self.type != NodeType.OBJECT:
-            raise ValueError(
-                f'Cannot consume object items on a value of type {self.type}'
-            )
-
-        # If we already know the size of this object, either do nothing or raise
-        # if the requested key is not found
-        if self.size is not None:
-            if key is None or key not in self.children:
-                return
-            else:
-                raise KeyError(f'Key {key!r} not found')
-
-        # If we already know this key
+        # If we already know this key, do nothing
         if key in self.children:
             return
 
-        # Position the file cursor on the start of the next child
-        if len(self.children) == 0:
-            self.file.seek(self.pos + 1)
-
-            self.skip_skippable()
-        else:
-            last_child = self.children[self.last_key]
-
-            self.file.seek(last_child.pos + last_child.compute_value_length())
-
-            if not self.skip_comma() and key is not None:
-                raise KeyError(f'Key {key!r} not found')
-
         # Keep reading children until we get to the one we want or we find the
-        # end of the JSON array
+        # end of the JSON object
         while True:
-            if self.peek(1) == b'}':
-                self.size = len(self.children)
+            child = self.read_next_object_child(key is not None)
 
-                self.end = self.file.tell() + 1
+            if key is None and child is None:
+                # We have successfully read all children
+                return
 
-                if key is None:
-                    return
-                else:
-                    raise KeyError(f'Key {key!r} not found')
-
-            # We need to read a string. This string will not be a real node, but
-            # we treat it as such here because it greatly simplifies the code,
-            # even though it will probably use more memory than strictly needed.
-            # But its use is temporary anyway, so this shouldn't be much of a
-            # problem.
-            this_key = Node(self.file, self.file.tell())
-
-            if this_key.type != NodeType.STRING:
-                raise ValueError(f'Cannot use {this_key.type} as object keys')
-
-            pos = this_key.pos + this_key.compute_value_length()
-
-            this_key = this_key.value()
-
-            self.file.seek(pos)
-
-            if not self.skip_colon():
-                raise ValueError('Expecting a colon')
-
-            child = Node(self.file, self.file.tell())
-
-            self.children[this_key] = child
-            self.last_key = this_key
-
-            if this_key == key:
+            if key in self.children:
                 # We have found as many children as requested; in this case
                 # there is no need to find out the length of this child
                 return
 
-            self.file.seek(child.pos + child.compute_value_length())
+    def read_next_object_child(self, expecting_next):
+        # If we already know the size of the array, there are no more items
+        if self.size is not None:
+            if expecting_next:
+                raise KeyError(f'Key not found')
+            else:
+                return None
 
-            if not self.skip_comma() and key is not None:
-                raise KeyError(f'Key {key!r} not found')
+        self.seek_next_child(expecting_next)
+
+        if self.peek(1) == b'}':
+            self.size = len(self.children)
+
+            self.end = self.file.tell() + 1
+
+            if expecting_next:
+                raise KeyError(f'Key not found')
+            else:
+                return None
+
+        # We need to read a string. This string will not be a real node, but
+        # we treat it as such here because it greatly simplifies the code,
+        # even though it will probably use more memory than strictly needed.
+        # But its use is temporary anyway, so this shouldn't be much of a
+        # problem.
+        this_key = Node(self.file, self.file.tell())
+
+        if this_key.type != NodeType.STRING:
+            raise ValueError(f'Cannot use {this_key.type} as object key')
+
+        pos = this_key.end_position()  # TODO: Can it move down?
+
+        this_key = this_key.value()
+
+        self.file.seek(pos)
+
+        if not self.skip_colon():
+            raise ValueError('Expecting a colon')
+
+        child = Node(self.file, self.file.tell())
+
+        self.children[this_key] = child
+        self.last_key = this_key
+
+        return child
 
     def __getitem__(self, key):
         if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
@@ -418,6 +423,42 @@ class Node:
             self.read_object_children_up_to(None)
 
         return len(self.children)
+
+    def __iter__(self):
+        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
+            raise ValueError(
+                f'Cannot iterate over a value of type {self.type}'
+            )
+
+        if self.type == NodeType.ARRAY:
+            yield from self.children
+
+            while True:
+                child = self.read_next_array_child(False)
+
+                if child is not None:
+                    yield child
+                else:
+                    return
+
+        elif self.type == NodeType.OBJECT:
+            yield from self.children
+
+            while True:
+                child = self.read_next_object_child(False)
+
+                if child is not None:
+                    yield self.last_key
+                else:
+                    return
+
+    def keys(self):
+        if self.type != NodeType.OBJECT:
+            raise ValueError(
+                f'Cannot get keys of values of type {self.type}'
+            )
+
+        return iter(self)
 
     def parse_string(self):
         self.file.seek(self.pos)

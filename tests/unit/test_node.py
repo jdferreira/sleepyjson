@@ -88,8 +88,8 @@ def test_nodes_know_where_they_end():
     test_content = b'{"a": [1, true, false, null]}'
 
     test_cases = [
-        (0, b'{"a": [1, true, false, null]}'),
-        (1, b'"a"'),
+        # (0, b'{"a": [1, true, false, null]}'),
+        # (1, b'"a"'),
         (6, b'[1, true, false, null]'),
         (7, b'1'),
         (10, b'true'),
@@ -227,3 +227,49 @@ def test_deep_node():
         'b': 'String',
         'c': {'d': {'e': [False, False]}},
     }
+
+
+def test_objects_know_their_keys():
+    node = create_node(b'{"a": 0, "b": 0, "c": 0}')
+
+    assert sorted(node.keys()) == ['a', 'b', 'c']
+
+
+def test_objects_can_test_key_membership():
+    assert 'a' in create_node(b'{"a": 0}')
+
+
+def test_malformed_json_is_not_read_unless_requested():
+    node = create_node(b'{"a": [], invalid json follows!!!')
+
+    assert node.type == NodeType.OBJECT
+    assert node['a'].is_array()
+    assert len(node['a']) == 0
+
+
+def test_array_nodes_can_be_iterated():
+    assert [i.value() for i in create_node(b'[0, false]')] == [0, False]
+
+def test_object_nodes_can_be_iterated():
+    assert sorted(create_node(b'{"a": 0, "b": false}')) == ['a', 'b']
+
+def test_iterating_over_malformed_json_is_allowed_before_the_invalid_region_is_reached():
+    it = iter(create_node(b'[0, false, invalid json'))
+
+    assert next(it).value() == 0
+    assert next(it).value() == False
+
+    it = iter(create_node(b'[0, false // unterminated json'))
+
+    assert next(it).value() == 0
+    assert next(it).value() == False
+
+    it = iter(create_node(b'{"a": 0, "b": false, invalid json'))
+
+    assert next(it) == 'a'
+    assert next(it) == 'b'
+
+    it = iter(create_node(b'{"a": 0, "b": false // unterminated json'))
+
+    assert next(it) == 'a'
+    assert next(it) == 'b'

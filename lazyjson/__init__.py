@@ -1,7 +1,8 @@
 from .reader import Reader
-from .node import Node
+from .node import Node, NodeType
 
 __all__ = [
     'Reader',
-    'Node'
+    'Node',
+    'NodeType',
 ]
