@@ -1,7 +1,7 @@
 import io
 
 import pytest
-from lazyjson.node import Node, measure_string, measure_number
+from lazyjson.node import Node, NodeType, measure_string, measure_number
 
 
 def create_node(content, pos=0):
@@ -81,7 +81,7 @@ def test_nodes_know_where_they_end():
     test_content = '{"a": [1, true, false, null]}'
 
     test_cases = [
-        # (0, '{"a": [1, true, false, null]}'),
+        (0, '{"a": [1, true, false, null]}'),
         (1, '"a"'),
         (6, '[1, true, false, null]'),
         (7, '1'),
@@ -132,6 +132,11 @@ def test_arrays_can_have_trailing_comma():
     assert len(create_node('[1, ]')) == 1
     assert len(create_node('[ 1 , ]')) == 1
 
+def test_array_nodes_can_consume_their_content():
+    assert create_node('[]').value() == []
+    assert create_node('[1]').value() == [1]
+    assert create_node('["a"]').value() == ['a']
+    assert create_node('[[]]').value() == [[]]
 
 def test_object_nodes_can_be_indexed():
     node = create_node('{"a": 0, "b": 1}')
@@ -160,7 +165,7 @@ def test_object_nodes_can_be_indexed():
         create_node('{:}')['a']
 
 
-def test_array_nodes_have_a_length():
+def test_object_nodes_have_a_length():
     assert len(create_node('{}')) == 0
     assert len(create_node('{"a": 1}')) == 1
     assert len(create_node('{"a": 1, "b": 2}')) == 2
@@ -172,3 +177,43 @@ def test_objects_can_have_trailing_comma():
     assert len(create_node('{"a": 1,}')) == 1
     assert len(create_node('{"a": 1, }')) == 1
     assert len(create_node('{ "a": 1 , }')) == 1
+
+
+def test_comments_are_allowed():
+    node = create_node('// Comment\n[1, 2, 3, // Another\n]')
+
+    assert node.type == NodeType.ARRAY
+    assert len(node) == 3
+    assert node[0].value() == 1
+    assert node[1].value() == 2
+    assert node[2].value() == 3
+
+    with pytest.raises(IndexError):
+        node[3]
+
+def test_object_nodes_can_consume_their_content():
+    assert create_node('{}').value() == {}
+    assert create_node('{"a": 1}').value() == {'a': 1}
+    assert create_node('{"a": "b"}').value() == {'a': 'b'}
+    assert create_node('{"empty": {}}').value() == {'empty': {}}
+
+
+def test_deep_node():
+    node = create_node("""
+        {
+            // Comment
+            "a": [1, 2, 3, ["inner", "string"]],
+            "b": "String",
+            "c": {"d": {"e": [false, false]}},
+        }
+    """)
+
+    assert node['a'][0].value() == 1
+    assert node['a'][3].value() == ['inner', 'string']
+    assert node['c']['d']['e'][0].value() == False
+
+    assert node.value() == {
+        'a': [1, 2, 3, ['inner', 'string']],
+        'b': 'String',
+        'c': {'d': {'e': [False, False]}},
+    }

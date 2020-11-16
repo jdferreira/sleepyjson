@@ -197,6 +197,14 @@ class Node:
             return self.parse_string()
         elif self.type == NodeType.NUMBER:
             return self.parse_number()
+        elif self.type == NodeType.ARRAY:
+            self.read_array_children_up_to(None)
+
+            return [child.value() for child in self.children]
+        elif self.type == NodeType.OBJECT:
+            self.read_object_children_up_to(None)
+
+            return {key: child.value() for key, child in self.children.items()}
 
     def compute_value_length(self):
         if self.type == NodeType.TRUE:
@@ -211,6 +219,10 @@ class Node:
             return measure_number(self.file, self.pos)
         elif self.type == NodeType.ARRAY:
             self.read_array_children_up_to(None)
+
+            return self.end - self.pos
+        elif self.type == NodeType.OBJECT:
+            self.read_object_children_up_to(None)
 
             return self.end - self.pos
 
