@@ -2,10 +2,10 @@ from __future__ import annotations
 from enum import Enum, auto
 import re
 
-from typing import Dict, List, TextIO, Union
+from typing import BinaryIO, Dict, List, Union
 
 NUMBER_REGEX = re.compile(
-    r'''
+    br'''
         ^                       # The beginning of the string
         -?                      # Optional negative sign
         (?: 0 | [1-9]\d* )      # The integral part, which cannot be empty and
@@ -13,8 +13,8 @@ NUMBER_REGEX = re.compile(
         (?: \.\d+ )?            # The optional fractional part
         (?: [eE] [+-]? \d+ )?   # The optional exponent
 
-        # We don't test the end of the string because we need to know where a
-        # valid number ends
+        # We don't test the end of the string because we don't need to know what
+        # comes after the valid number
     ''',
     re.VERBOSE
 )
@@ -31,19 +31,19 @@ class NodeType(Enum):
 
 
 SIMPLE_DETERMINANTS = [
-    ('{', NodeType.OBJECT),
-    ('[', NodeType.ARRAY),
-    ('"', NodeType.STRING),
-    ('true', NodeType.TRUE),
-    ('false', NodeType.FALSE),
-    ('null', NodeType.NULL),
+    (b'{', NodeType.OBJECT),
+    (b'[', NodeType.ARRAY),
+    (b'"', NodeType.STRING),
+    (b'true', NodeType.TRUE),
+    (b'false', NodeType.FALSE),
+    (b'null', NodeType.NULL),
 ]
 
 COMPLEX_DETERMINANTS = [
-    ('0123456789-', NodeType.NUMBER),
+    (b'0123456789-', NodeType.NUMBER),
 ]
 
-WHITESPACE = '\r\n\t '
+WHITESPACE = b'\r\n\t '
 
 # The maximum number of characters we need to read in order to determine this
 # node's type
@@ -53,13 +53,14 @@ MAX_NEEDED_CHARS = 5
 class Node:
     children: Union[List[Node], Dict[str, Node]]
 
-    def __init__(self, file: TextIO, pos: int):
+    def __init__(self, file: BinaryIO, pos: int):
         self.file = file
 
         if not file.seekable():
-            raise ValueError('Nodes need to be able to seek into the files')
+            raise ValueError('Nodes need to be able to seek into the file')
 
-        # TODO: Ensure the file is opened in binary mode!
+        if not self.is_binary():
+            raise ValueError('Nodes need the file to be opened in binary mode')
 
         self.skip_to_start(pos)
 
@@ -75,6 +76,9 @@ class Node:
             self.size = None
             self.end = None
 
+    def is_binary(self):
+        return self.file.read(0) == b''
+
     def skip_to_start(self, pos):
         self.file.seek(pos)
 
@@ -88,19 +92,32 @@ class Node:
         while True:
             c = self.file.read(1)
 
-            if c == '':
+            if c == b'':
                 raise ValueError('Unexpected end of file')
 
             if in_comment:
-                if c == '\n':
+                if c == b'\r':
+                    pos = self.file.tell()
+                    next_c = self.file.read(1)
+
+                    if next_c != b'\n':
+                        self.file.seek(pos)
+                    in_comment = False
+                elif c == b'\n':
                     in_comment = False
                 continue
 
             if c in WHITESPACE:
                 continue
 
-            if c == '/' and self.file.read(1) == '/':
-                in_comment = True
+            if c == b'/':
+                pos = self.file.tell()
+                next_c = self.file.read(1)
+
+                if next_c != b'/':
+                    self.file.seek(pos)
+                else:
+                    in_comment = True
 
                 continue
 
@@ -111,7 +128,7 @@ class Node:
     def skip_comma(self):
         self.skip_skippable()
 
-        if self.peek(1) == ',':
+        if self.peek(1) == b',':
             self.file.read(1)
 
             self.skip_skippable()
@@ -123,7 +140,7 @@ class Node:
     def skip_colon(self):
         self.skip_skippable()
 
-        if self.peek(1) == ':':
+        if self.peek(1) == b':':
             self.file.read(1)
 
             self.skip_skippable()
@@ -154,7 +171,7 @@ class Node:
                 return node_type
 
         for options, node_type in COMPLEX_DETERMINANTS:
-            if any(buf.startswith(c) for c in options):
+            if any(buf[0] == c for c in options):
                 return node_type
 
         raise ValueError(f'Unexpected input: {buf[0]}')
@@ -256,7 +273,7 @@ class Node:
         # Keep reading children until we get to the one we want or we find the
         # end of the JSON array
         while True:
-            if self.peek(1) == ']':
+            if self.peek(1) == b']':
                 self.size = len(self.children)
 
                 self.end = self.file.tell() + 1
@@ -312,7 +329,7 @@ class Node:
         # Keep reading children until we get to the one we want or we find the
         # end of the JSON array
         while True:
-            if self.peek(1) == '}':
+            if self.peek(1) == b'}':
                 self.size = len(self.children)
 
                 self.end = self.file.tell() + 1
@@ -403,7 +420,7 @@ class Node:
 
         prev = 1
         while True:
-            backslash = string.find('\\', prev)
+            backslash = string.find(b'\\', prev)
 
             if backslash == -1:
                 parts.append(string[prev:-1])
@@ -414,14 +431,14 @@ class Node:
             next_char = string[backslash + 1]
 
             MAP = {
-                '"' : '"',
-                '\\': '\\',
-                '/': '/',
-                'b': '\b',
-                'f': '\f',
-                'n': '\n',
-                'r': '\r',
-                't': '\t',
+                b'"': b'"',
+                b'\\': b'\\',
+                b'/': b'/',
+                b'b': b'\b',
+                b'f': b'\f',
+                b'n': b'\n',
+                b'r': b'\r',
+                b't': b'\t',
             }
 
             escaped = MAP.get(next_char, None)
@@ -434,7 +451,7 @@ class Node:
             else:
                 raise ValueError(f'Unknown escaped sequence: \\{next_char}')
 
-        return ''.join(parts)
+        return b''.join(parts).decode('utf8')
 
 
     def parse_number(self):
@@ -447,20 +464,8 @@ class Node:
         return float(string)
 
 
-def measure_string(file: TextIO, pos: int):
-    # Repeat this:
-    # - Read a bunch characters
-    # - If 0 characters were returned, the string did not end... Raise
-    #   exception
-    # - Repeat this:
-    #   - Look for the first occurrence of a "\n" or a quote
-    #   - If we found a "\n", the string is not properly finished. Raise
-    #     exception
-    #   - If it is a non-escaped quote, we found the end of the string!
-    #     Return
-
-    # Skip the start quote
-    file.seek(pos + 1)
+def measure_string(file: BinaryIO, pos: int):
+    file.seek(pos + 1)  # Skip the start quote
 
     result = 1
 
@@ -472,11 +477,11 @@ def measure_string(file: TextIO, pos: int):
 
         quote_pos = 0
         while True:
-            quote_pos = buf.find('"', quote_pos)
+            quote_pos = buf.find(b'"', quote_pos)
 
             if quote_pos == -1:
                 break
-            elif buf[quote_pos - 1] == '\\':
+            elif buf[quote_pos - 1:quote_pos] == b'\\':
                 # Skip this quote
                 quote_pos += 1
 
@@ -486,7 +491,7 @@ def measure_string(file: TextIO, pos: int):
 
         if quote_pos == -1:
             # We did not find a quote, so we need to search longer
-            if '\n' in buf:
+            if b'\n' in buf or b'\r' in buf:
                 raise ValueError('End of line while scanning string')
 
             result += len(buf)
@@ -494,7 +499,9 @@ def measure_string(file: TextIO, pos: int):
 
         break
 
-    if '\n' in buf[:quote_pos]:
+    buf = buf[:quote_pos]
+
+    if b'\n' in buf or b'\r' in buf:
         raise ValueError('End of line while scanning string')
 
     # We must include the quote in the length of the string
@@ -503,7 +510,7 @@ def measure_string(file: TextIO, pos: int):
     return result
 
 
-def measure_number(file: TextIO, pos: int):
+def measure_number(file: BinaryIO, pos: int):
     # Grab all valid number characters and parse the result
 
     file.seek(pos)
@@ -516,14 +523,14 @@ def measure_number(file: TextIO, pos: int):
         # time to run
         c = file.read(1)
 
-        if c == '':
+        if c == b'':
             break
-        elif c in '-+0123456789eE.':
+        elif c in b'-+0123456789eE.':
             accumulated.append(c)
         else:
             break
 
-    accumulated = ''.join(accumulated)
+    accumulated = b''.join(accumulated)
 
     m = NUMBER_REGEX.match(accumulated)
 

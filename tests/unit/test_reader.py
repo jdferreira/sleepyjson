@@ -28,10 +28,6 @@ def sample():
     return Reader(io.StringIO(TEST_CONTENT))
 
 
-def test_readers_are_nodes(sample):
-    assert isinstance(sample, Node)
-
-
 # def test_fails_on_non_existing_keys(sample):
 #     with pytest.raises(KeyError):
 #         sample['x']
