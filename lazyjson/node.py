@@ -245,7 +245,9 @@ class Node:
 
     def read_array_children_up_to(self, amount: Union[int, None]):
         if self.type != NodeType.ARRAY:
-            raise ValueError(f'Cannot consume array items on a value of type {self.type}')
+            raise ValueError(
+                f'Cannot consume array items on a value of type {self.type}'
+            )
 
         # If we already know the size of this array, either do nothing or raise
         # if the requested size is too large
@@ -265,7 +267,9 @@ class Node:
 
             self.skip_skippable()
         else:
-            self.file.seek(self.children[-1].pos + self.children[-1].compute_value_length())
+            child = self.children[-1]
+
+            self.file.seek(child.pos + child.compute_value_length())
 
             if not self.skip_comma() and amount is not None:
                 raise IndexError('Array index out of range')
@@ -299,7 +303,9 @@ class Node:
 
     def read_object_children_up_to(self, key: Union[str, None]):
         if self.type != NodeType.OBJECT:
-            raise ValueError(f'Cannot consume object items on a value of type {self.type}')
+            raise ValueError(
+                f'Cannot consume object items on a value of type {self.type}'
+            )
 
         # If we already know the size of this object, either do nothing or raise
         # if the requested key is not found
@@ -379,7 +385,9 @@ class Node:
 
         if self.type == NodeType.ARRAY:
             if not isinstance(key, int):
-                raise ValueError(f'Can only index arrays with integers, not {type(key)}')
+                raise ValueError(
+                    f'Can only index arrays with integers, not {type(key)}'
+                )
 
             if key < 0:
                 self.read_array_children_up_to(None)
@@ -390,7 +398,9 @@ class Node:
 
         elif self.type == NodeType.OBJECT:
             if not isinstance(key, str):
-                raise ValueError(f'Can only index objects with strings, not {type(key)}')
+                raise ValueError(
+                    f'Can only index objects with strings, not {type(key)}'
+                )
 
             self.read_object_children_up_to(key)
 
@@ -398,7 +408,9 @@ class Node:
 
     def __len__(self):
         if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
-            raise ValueError(f'Cannot measure the length of values of type {self.type}')
+            raise ValueError(
+                f'Cannot measure the length of values of type {self.type}'
+            )
 
         if self.type == NodeType.ARRAY:
             self.read_array_children_up_to(None)
@@ -452,7 +464,6 @@ class Node:
                 raise ValueError(f'Unknown escaped sequence: \\{next_char}')
 
         return b''.join(parts).decode('utf8')
-
 
     def parse_number(self):
         length = self.compute_value_length()

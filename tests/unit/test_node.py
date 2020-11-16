@@ -139,11 +139,13 @@ def test_arrays_can_have_trailing_comma():
     assert len(create_node(b'[1, ]')) == 1
     assert len(create_node(b'[ 1 , ]')) == 1
 
+
 def test_array_nodes_can_consume_their_content():
     assert create_node(b'[]').value() == []
     assert create_node(b'[1]').value() == [1]
     assert create_node(b'["a"]').value() == ['a']
     assert create_node(b'[[]]').value() == [[]]
+
 
 def test_object_nodes_can_be_indexed():
     node = create_node(b'{"a": 0, "b": 1}')
@@ -197,6 +199,7 @@ def test_comments_are_allowed():
 
     with pytest.raises(IndexError):
         node[3]
+
 
 def test_object_nodes_can_consume_their_content():
     assert create_node(b'{}').value() == {}
