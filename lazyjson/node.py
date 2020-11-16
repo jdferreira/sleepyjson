@@ -68,9 +68,11 @@ class Node:
         if self.type == NodeType.ARRAY:
             self.children = []
             self.size = None
+            self.end = None
         elif self.type == NodeType.OBJECT:
             self.children = {}
             self.size = None
+            self.end = None
 
     def skip_to_start(self, pos):
         self.file.seek(pos)
@@ -194,8 +196,10 @@ class Node:
             return measure_string(self.file, self.pos)
         elif self.type == NodeType.NUMBER:
             return measure_number(self.file, self.pos)
-        # elif self.type == NodeType.ARRAY:
-        #     return ...
+        elif self.type == NodeType.ARRAY:
+            self.read_array_children_up_to(None)
+
+            return self.end - self.pos
 
     def read_array_children_up_to(self, amount: Union[int, None]):
         if self.type != NodeType.ARRAY:
@@ -229,6 +233,8 @@ class Node:
         while True:
             if self.peek(1) == ']':
                 self.size = len(self.children)
+
+                self.end = self.file.tell() + 1
 
                 if amount is None:
                     return
