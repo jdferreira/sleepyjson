@@ -71,6 +71,7 @@ class Node:
             self.end = None
         elif self.type == NodeType.OBJECT:
             self.children = {}
+            self.last_key = None
             self.size = None
             self.end = None
 
@@ -111,6 +112,18 @@ class Node:
         self.skip_skippable()
 
         if self.peek(1) == ',':
+            self.file.read(1)
+
+            self.skip_skippable()
+
+            return True
+        else:
+            return False
+
+    def skip_colon(self):
+        self.skip_skippable()
+
+        if self.peek(1) == ':':
             self.file.read(1)
 
             self.skip_skippable()
@@ -255,6 +268,82 @@ class Node:
             if not self.skip_comma() and amount is not None:
                 raise IndexError('Array index out of range')
 
+    def read_object_children_up_to(self, key: Union[str, None]):
+        if self.type != NodeType.OBJECT:
+            raise ValueError(f'Cannot consume object items on a value of type {self.type}')
+
+        # If we already know the size of this object, either do nothing or raise
+        # if the requested key is not found
+        if self.size is not None:
+            if key is None or key not in self.children:
+                return
+            else:
+                raise KeyError(f'Key {key!r} not found')
+
+        # If we already know this key
+        if key in self.children:
+            return
+
+        # Position the file cursor on the start of the next child
+        if len(self.children) == 0:
+            self.file.seek(self.pos + 1)
+
+            self.skip_skippable()
+        else:
+            last_child = self.children[self.last_key]
+
+            self.file.seek(last_child.pos + last_child.compute_value_length())
+
+            if not self.skip_comma() and key is not None:
+                raise KeyError(f'Key {key!r} not found')
+
+        # Keep reading children until we get to the one we want or we find the
+        # end of the JSON array
+        while True:
+            if self.peek(1) == '}':
+                self.size = len(self.children)
+
+                self.end = self.file.tell() + 1
+
+                if key is None:
+                    return
+                else:
+                    raise KeyError(f'Key {key!r} not found')
+
+            # We need to read a string. This string will not be a real node, but
+            # we treat it as such here because it greatly simplifies the code,
+            # even though it will probably use more memory than strictly needed.
+            # But its use is temporary anyway, so this shouldn't be much of a
+            # problem.
+            this_key = Node(self.file, self.file.tell())
+
+            if this_key.type != NodeType.STRING:
+                raise ValueError(f'Cannot use {this_key.type} as object keys')
+
+            pos = this_key.pos + this_key.compute_value_length()
+
+            this_key = this_key.value()
+
+            self.file.seek(pos)
+
+            if not self.skip_colon():
+                raise ValueError('Expecting a colon')
+
+            child = Node(self.file, self.file.tell())
+
+            self.children[this_key] = child
+            self.last_key = this_key
+
+            if this_key == key:
+                # We have found as many children as requested; in this case
+                # there is no need to find out the length of this child
+                return
+
+            self.file.seek(child.pos + child.compute_value_length())
+
+            if not self.skip_comma() and key is not None:
+                raise KeyError(f'Key {key!r} not found')
+
     def __getitem__(self, key):
         if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
             raise ValueError(f'Cannot index values of type {self.type}')
@@ -274,6 +363,10 @@ class Node:
             if not isinstance(key, str):
                 raise ValueError(f'Can only index objects with strings, not {type(key)}')
 
+            self.read_object_children_up_to(key)
+
+            return self.children[key]
+
     def __len__(self):
         if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
             raise ValueError(f'Cannot measure the length of values of type {self.type}')
@@ -281,14 +374,18 @@ class Node:
         if self.type == NodeType.ARRAY:
             self.read_array_children_up_to(None)
         elif self.type == NodeType.OBJECT:
-            pass
+            self.read_object_children_up_to(None)
 
         return len(self.children)
 
     def parse_string(self):
         self.file.seek(self.pos)
 
-        string = self.peek(self.compute_value_length())
+        length = self.compute_value_length()
+
+        self.file.seek(self.pos)
+
+        string = self.peek(length)
 
         parts = []
 

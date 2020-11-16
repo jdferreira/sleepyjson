@@ -134,11 +134,41 @@ def test_arrays_can_have_trailing_comma():
 
 
 def test_object_nodes_can_be_indexed():
-    node = create_node('{"a": 123}')
+    node = create_node('{"a": 0, "b": 1}')
 
     assert isinstance(node['a'], Node)
     assert node['a'].is_number()
-    assert node['a'].value() == 123
+    assert node['a'].value() == 0
+    assert node['b'].value() == 1
+
+    with pytest.raises(KeyError):
+        node['c']
 
     with pytest.raises(ValueError):
-        create_node('""')['a']
+        create_node('[]')['a']
+
+    with pytest.raises(ValueError):
+        create_node('{"a"}')['a']
+
+    with pytest.raises(ValueError):
+        create_node('{"a",}')['a']
+
+    with pytest.raises(ValueError):
+        create_node('{"a":}')['a']
+
+    with pytest.raises(ValueError):
+        create_node('{:}')['a']
+
+
+def test_array_nodes_have_a_length():
+    assert len(create_node('{}')) == 0
+    assert len(create_node('{"a": 1}')) == 1
+    assert len(create_node('{"a": 1, "b": 2}')) == 2
+    assert len(create_node('{"a": 1, "b": 2, "c": "abc"}')) == 3
+
+
+def test_objects_can_have_trailing_comma():
+    assert len(create_node('{"a": 1}')) == 1
+    assert len(create_node('{"a": 1,}')) == 1
+    assert len(create_node('{"a": 1, }')) == 1
+    assert len(create_node('{ "a": 1 , }')) == 1
