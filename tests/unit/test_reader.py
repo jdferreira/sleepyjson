@@ -77,3 +77,11 @@ def test_end_of_stream(sample):
 
     assert sample.finished()
 
+def test_readers_on_arrays_or_objects_are_iterables(sample):
+    it = iter(sample)
+
+    assert next(it) == 'a'
+    assert next(it) == 'b'
+    assert next(it) == 'c'
+    assert next(it) == 'd'
+    assert next(it) == 'e'

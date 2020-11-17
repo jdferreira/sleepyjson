@@ -17,6 +17,9 @@ class Reader:
     def __len__(self):
         return len(self.top_node)
 
+    def __iter__(self):
+        return iter(self.top_node)
+
     def next(self):
         end = self.top_node.end_position()
 

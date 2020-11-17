@@ -273,3 +273,23 @@ def test_iterating_over_malformed_json_is_allowed_before_the_invalid_region_is_r
 
     assert next(it) == 'a'
     assert next(it) == 'b'
+
+
+def test_items_not_followed_by_comma_are_the_end_of_the_container():
+    with pytest.raises(ValueError):
+        create_node(b'[0, false null]').value()
+
+
+def test_strings_escape_their_contents():
+    create_node(b'"\\r\\n"').value() == '\r\n'
+
+
+def test_iterating_over_nodes_works_even_if_file_cursors_changes():
+    node = create_node(b'[0, false]')
+
+    first_child = node[0]
+    expected = [0, False]
+
+    for child, expected_item in zip(node, expected):
+        assert first_child.value() == 0
+        assert child.value() == expected_item

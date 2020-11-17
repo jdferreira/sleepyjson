@@ -251,6 +251,8 @@ class Node:
             self.file.seek(self.pos + 1)
 
             self.skip_skippable()
+
+            return False
         else:
             if self.type == NodeType.ARRAY:
                 child = self.children[-1]
@@ -259,11 +261,16 @@ class Node:
 
             self.file.seek(child.end_position())
 
-            if not self.skip_comma() and expecting_next:
-                if self.type == NodeType.ARRAY:
-                    raise IndexError('Array index out of range')
-                else:
-                    raise KeyError('Key not found')
+            if not self.skip_comma():
+                if expecting_next:
+                    if self.type == NodeType.ARRAY:
+                        raise IndexError('Array index out of range')
+                    else:
+                        raise KeyError('Key not found')
+
+                return True
+            else:
+                return False
 
     def read_next_array_child(self, expecting_next) -> Union[None, Node]:
         # If we already know the size of the array, there are no more items
@@ -273,7 +280,12 @@ class Node:
             else:
                 return None
 
-        self.seek_next_child(expecting_next)
+        must_end = self.seek_next_child(expecting_next)
+
+        if must_end and self.peek(1) != b']':
+            buf = self.peek(10)
+
+            raise ValueError(f'Unexpected input: {buf}')
 
         if self.peek(1) == b']':
             self.size = len(self.children)
@@ -467,35 +479,37 @@ class Node:
             backslash = string.find(b'\\', prev)
 
             if backslash == -1:
-                parts.append(string[prev:-1])
+                parts.append(string[prev:-1].decode('utf8'))
                 break
 
-            parts.append(string[prev:backslash])
+            parts.append(string[prev:backslash].decode('utf8'))
 
-            next_char = string[backslash + 1]
+            next_char = string[backslash + 1:backslash + 2]
 
             MAP = {
-                b'"': b'"',
-                b'\\': b'\\',
-                b'/': b'/',
-                b'b': b'\b',
-                b'f': b'\f',
-                b'n': b'\n',
-                b'r': b'\r',
-                b't': b'\t',
+                b'"': '"',
+                b'\\': '\\',
+                b'/': '/',
+                b'b': '\b',
+                b'f': '\f',
+                b'n': '\n',
+                b'r': '\r',
+                b't': '\t',
             }
 
             escaped = MAP.get(next_char, None)
 
             if escaped is not None:
                 parts.append(escaped)
-            elif next_char == 'u':
+            elif next_char == b'u':
                 codepoint = int(string[backslash + 2:backslash + 6], 16)
                 parts.append(chr(codepoint))
             else:
                 raise ValueError(f'Unknown escaped sequence: \\{next_char}')
 
-        return b''.join(parts).decode('utf8')
+            prev = backslash + 2
+
+        return ''.join(parts)
 
     def parse_number(self):
         length = self.compute_value_length()
