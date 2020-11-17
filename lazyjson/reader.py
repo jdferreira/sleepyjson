@@ -49,3 +49,9 @@ class Reader:
 
         return self.top_node
 
+    def finished(self):
+        self.top_node.file.seek(self.top_node.end_position())
+
+        self.top_node.skip_skippable()
+
+        return self.top_node.peek(1) == b''

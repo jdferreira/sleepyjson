@@ -88,8 +88,8 @@ def test_nodes_know_where_they_end():
     test_content = b'{"a": [1, true, false, null]}'
 
     test_cases = [
-        # (0, b'{"a": [1, true, false, null]}'),
-        # (1, b'"a"'),
+        (0, b'{"a": [1, true, false, null]}'),
+        (1, b'"a"'),
         (6, b'[1, true, false, null]'),
         (7, b'1'),
         (10, b'true'),

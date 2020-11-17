@@ -64,3 +64,16 @@ def test_reader_can_seek_values(sample):
 
     with pytest.raises(IndexError):
         sample.seek(-1)
+
+
+def test_end_of_stream(sample):
+    assert not sample.finished()
+
+    sample.next()
+
+    assert not sample.finished()
+
+    sample.next()
+
+    assert sample.finished()
+

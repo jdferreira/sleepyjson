@@ -93,7 +93,7 @@ class Node:
             c = self.file.read(1)
 
             if c == b'':
-                raise ValueError('Unexpected end of file')
+                return
 
             if in_comment:
                 if c == b'\r':
@@ -244,16 +244,7 @@ class Node:
             return self.end - self.pos
 
     def end_position(self):
-        if self.type == NodeType.ARRAY:
-            self.read_array_children_up_to(None)
-
-            return self.end
-        elif self.type == NodeType.OBJECT:
-            self.read_object_children_up_to(None)
-
-            return self.end
-        else:
-            return self.pos + self.compute_value_length()
+        return self.pos + self.compute_value_length()
 
     def seek_next_child(self, expecting_next):
         if len(self.children) == 0:
