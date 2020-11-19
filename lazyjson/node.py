@@ -1,11 +1,11 @@
 from __future__ import annotations
-from enum import Enum, auto
-import re
 
-from typing import BinaryIO, Dict, List, Union
+import re
+from collections import deque
+from enum import Enum, auto
 
 NUMBER_REGEX = re.compile(
-    br'''
+    r'''
         ^                       # The beginning of the string
         -?                      # Optional negative sign
         (?: 0 | [1-9]\d* )      # The integral part, which cannot be empty and
@@ -20,6 +20,18 @@ NUMBER_REGEX = re.compile(
 )
 
 
+ESCAPE_CHARACTERS_MAP = {
+    '"': '"',
+    '\\': '\\',
+    '/': '/',
+    'b': '\b',
+    'f': '\f',
+    'n': '\n',
+    'r': '\r',
+    't': '\t',
+}
+
+
 class NodeType(Enum):
     OBJECT = auto()
     ARRAY = auto()
@@ -31,19 +43,17 @@ class NodeType(Enum):
 
 
 SIMPLE_DETERMINANTS = [
-    (b'{', NodeType.OBJECT),
-    (b'[', NodeType.ARRAY),
-    (b'"', NodeType.STRING),
-    (b'true', NodeType.TRUE),
-    (b'false', NodeType.FALSE),
-    (b'null', NodeType.NULL),
+    ('{', NodeType.OBJECT),
+    ('[', NodeType.ARRAY),
+    ('"', NodeType.STRING),
+    ('true', NodeType.TRUE),
+    ('false', NodeType.FALSE),
+    ('null', NodeType.NULL),
 ]
 
-COMPLEX_DETERMINANTS = [
-    (b'0123456789-', NodeType.NUMBER),
-]
+NUMBER_DETERMINANTS = '0123456789-'
 
-WHITESPACE = b'\r\n\t '
+WHITESPACE = '\r\n\t '
 
 # The maximum number of characters we need to read in order to determine this
 # node's type
@@ -51,33 +61,20 @@ MAX_NEEDED_CHARS = 5
 
 
 class Node:
-    children: Union[List[Node], Dict[str, Node]]
-
-    def __init__(self, file: BinaryIO, pos: int):
+    def __init__(self, file, pos):
         self.file = file
 
         if not file.seekable():
             raise ValueError('Nodes need to be able to seek into the file')
 
-        if not self.is_binary():
-            raise ValueError('Nodes need the file to be opened in binary mode')
-
         self.skip_to_start(pos)
+
+        self.end = None
 
         self.type = self.get_type()
 
-        if self.type == NodeType.ARRAY:
-            self.children = []
-            self.size = None
-            self.end = None
-        elif self.type == NodeType.OBJECT:
-            self.children = {}
-            self.last_key = None
-            self.size = None
-            self.end = None
-
-    def is_binary(self):
-        return self.file.read(0) == b''
+        if self.type in [NodeType.ARRAY, NodeType.OBJECT]:
+            self.current_child = None
 
     def skip_to_start(self, pos):
         self.file.seek(pos)
@@ -92,29 +89,22 @@ class Node:
         while True:
             c = self.file.read(1)
 
-            if c == b'':
+            if c == '':
                 return
 
             if in_comment:
-                if c == b'\r':
-                    pos = self.file.tell()
-                    next_c = self.file.read(1)
-
-                    if next_c != b'\n':
-                        self.file.seek(pos)
-                    in_comment = False
-                elif c == b'\n':
+                if c == '\n':
                     in_comment = False
                 continue
 
             if c in WHITESPACE:
                 continue
 
-            if c == b'/':
+            if c == '/':
                 pos = self.file.tell()
                 next_c = self.file.read(1)
 
-                if next_c != b'/':
+                if next_c != '/':
                     self.file.seek(pos)
                 else:
                     in_comment = True
@@ -128,7 +118,7 @@ class Node:
     def skip_comma(self):
         self.skip_skippable()
 
-        if self.peek(1) == b',':
+        if self.peek(1) == ',':
             self.file.read(1)
 
             self.skip_skippable()
@@ -140,7 +130,7 @@ class Node:
     def skip_colon(self):
         self.skip_skippable()
 
-        if self.peek(1) == b':':
+        if self.peek(1) == ':':
             self.file.read(1)
 
             self.skip_skippable()
@@ -170,11 +160,10 @@ class Node:
             if buf.startswith(prefix):
                 return node_type
 
-        for options, node_type in COMPLEX_DETERMINANTS:
-            if any(buf[0] == c for c in options):
-                return node_type
+        if any(buf[0] == c for c in NUMBER_DETERMINANTS):
+            return NodeType.NUMBER
 
-        raise ValueError(f'Unexpected input: {buf[:10]}')
+        raise ValueError(f'Unexpected input: {buf[:10]!r}')
 
     def is_object(self):
         return self.type == NodeType.OBJECT
@@ -211,186 +200,47 @@ class Node:
         elif self.type == NodeType.NULL:
             return None
         elif self.type == NodeType.STRING:
-            return self.parse_string()
+            length = self.end_position() - self.pos
+
+            self.file.seek(self.pos)
+
+            literal = self.file.read(length)
+
+            return unescape_string_literal(literal)
         elif self.type == NodeType.NUMBER:
-            return self.parse_number()
+            length = self.end_position() - self.pos
+
+            self.file.seek(self.pos)
+
+            literal = self.file.read(length)
+
+            try:
+                return int(literal)
+            except ValueError:
+                return float(literal)
         elif self.type == NodeType.ARRAY:
-            self.read_array_children_up_to(None)
-
-            return [child.value() for child in self.children]
+            return [child.value() for child in iter(self)]
         elif self.type == NodeType.OBJECT:
-            self.read_object_children_up_to(None)
-
-            return {key: child.value() for key, child in self.children.items()}
-
-    def compute_value_length(self):
-        if self.type == NodeType.TRUE:
-            return 4
-        elif self.type == NodeType.FALSE:
-            return 5
-        elif self.type == NodeType.NULL:
-            return 4
-        elif self.type == NodeType.STRING:
-            return measure_string(self.file, self.pos)
-        elif self.type == NodeType.NUMBER:
-            return measure_number(self.file, self.pos)
-        elif self.type == NodeType.ARRAY:
-            self.read_array_children_up_to(None)
-
-            return self.end - self.pos
-        elif self.type == NodeType.OBJECT:
-            self.read_object_children_up_to(None)
-
-            return self.end - self.pos
+            return {key: child.value() for key, child in self.items()}
 
     def end_position(self):
-        return self.pos + self.compute_value_length()
+        if self.end is None:
+            if self.type == NodeType.TRUE:
+                self.end = self.pos + 4
+            elif self.type == NodeType.FALSE:
+                self.end = self.pos + 5
+            elif self.type == NodeType.NULL:
+                self.end = self.pos + 4
+            elif self.type == NodeType.STRING:
+                self.end = self.pos + measure_string(self.file, self.pos)
+            elif self.type == NodeType.NUMBER:
+                self.end = self.pos + measure_number(self.file, self.pos)
+            elif self.type in [NodeType.ARRAY, NodeType.OBJECT]:
+                self.seek_to_end()
 
-    def seek_next_child(self, expecting_next):
-        if len(self.children) == 0:
-            self.file.seek(self.pos + 1)
-
-            self.skip_skippable()
-
-            return False
-        else:
-            if self.type == NodeType.ARRAY:
-                child = self.children[-1]
-            else:
-                child = self.children[self.last_key]
-
-            self.file.seek(child.end_position())
-
-            if not self.skip_comma():
-                if expecting_next:
-                    if self.type == NodeType.ARRAY:
-                        raise IndexError('Array index out of range')
-                    else:
-                        raise KeyError('Key not found')
-
-                return True
-            else:
-                return False
-
-    def read_next_array_child(self, expecting_next) -> Union[None, Node]:
-        # If we already know the size of the array, there are no more items
-        if self.size is not None:
-            if expecting_next:
-                raise IndexError('Array index out of range')
-            else:
-                return None
-
-        must_end = self.seek_next_child(expecting_next)
-
-        if must_end and self.peek(1) != b']':
-            buf = self.peek(10)
-
-            raise ValueError(f'Unexpected input: {buf}')
-
-        if self.peek(1) == b']':
-            self.size = len(self.children)
-
-            self.end = self.file.tell() + 1
-
-            if expecting_next:
-                raise IndexError('Array index out of range')
-            else:
-                return None
-
-        child = Node(self.file, self.file.tell())
-
-        self.children.append(child)
-
-        return child
-
-    def read_array_children_up_to(self, amount: Union[int, None]):
-        # If we already know the necessary amount of children, do nothing
-        if amount is not None and amount <= len(self.children):
-            return
-
-        # Keep reading children until we get to the one we want or we find the
-        # end of the JSON array
-        while True:
-            child = self.read_next_array_child(amount is not None)
-
-            if amount is None and child is None:
-                # We have successfully read all children
-                return
-
-            if len(self.children) == amount:
-                # We have found as many children as requested; in this case
-                # there is no need to find out the length of this child
-                return
-
-    def read_object_children_up_to(self, key: Union[str, None]):
-        # If we already know this key, do nothing
-        if key in self.children:
-            return
-
-        # Keep reading children until we get to the one we want or we find the
-        # end of the JSON object
-        while True:
-            child = self.read_next_object_child(key is not None)
-
-            if key is None and child is None:
-                # We have successfully read all children
-                return
-
-            if key in self.children:
-                # We have found as many children as requested; in this case
-                # there is no need to find out the length of this child
-                return
-
-    def read_next_object_child(self, expecting_next):
-        # If we already know the size of the array, there are no more items
-        if self.size is not None:
-            if expecting_next:
-                raise KeyError(f'Key not found')
-            else:
-                return None
-
-        self.seek_next_child(expecting_next)
-
-        if self.peek(1) == b'}':
-            self.size = len(self.children)
-
-            self.end = self.file.tell() + 1
-
-            if expecting_next:
-                raise KeyError(f'Key not found')
-            else:
-                return None
-
-        # We need to read a string. This string will not be a real node, but
-        # we treat it as such here because it greatly simplifies the code,
-        # even though it will probably use more memory than strictly needed.
-        # But its use is temporary anyway, so this shouldn't be much of a
-        # problem.
-        this_key = Node(self.file, self.file.tell())
-
-        if this_key.type != NodeType.STRING:
-            raise ValueError(f'Cannot use {this_key.type} as object key')
-
-        pos = this_key.end_position()  # TODO: Can it move down?
-
-        this_key = this_key.value()
-
-        self.file.seek(pos)
-
-        if not self.skip_colon():
-            raise ValueError('Expecting a colon')
-
-        child = Node(self.file, self.file.tell())
-
-        self.children[this_key] = child
-        self.last_key = this_key
-
-        return child
+        return self.end
 
     def __getitem__(self, key):
-        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
-            raise ValueError(f'Cannot index values of type {self.type}')
-
         if self.type == NodeType.ARRAY:
             if not isinstance(key, int):
                 raise ValueError(
@@ -398,11 +248,18 @@ class Node:
                 )
 
             if key < 0:
-                self.read_array_children_up_to(None)
-            else:
-                self.read_array_children_up_to(key + 1)
+                queue = deque(self, -key)
 
-            return self.children[key]
+                if len(queue) < -key:
+                    raise IndexError('Array index out of bounds')
+                else:
+                    return queue[0]
+            else:
+                try:
+                    # I'd like `iter(self).nth(i)` but it doesn't exist
+                    return next(child for i, child in enumerate(self) if i == key)
+                except StopIteration:
+                    raise IndexError('Array index out of bounds')
 
         elif self.type == NodeType.OBJECT:
             if not isinstance(key, str):
@@ -410,118 +267,151 @@ class Node:
                     f'Can only index objects with strings, not {type(key)}'
                 )
 
-            self.read_object_children_up_to(key)
+            try:
+                return next(child for child_key, child in self.items() if child_key == key)
+            except StopIteration:
+                raise KeyError('Key not found')
 
-            return self.children[key]
+        else:
+            raise ValueError(f'Cannot index values of type {self.type}')
 
     def __len__(self):
-        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
-            raise ValueError(
-                f'Cannot measure the length of values of type {self.type}'
-            )
-
-        if self.type == NodeType.ARRAY:
-            self.read_array_children_up_to(None)
-        elif self.type == NodeType.OBJECT:
-            self.read_object_children_up_to(None)
-
-        return len(self.children)
+        return sum(1 for _ in self)
 
     def __iter__(self):
-        if self.type not in [NodeType.OBJECT, NodeType.ARRAY]:
+        if self.type == NodeType.OBJECT:
+            yield from (key for key, _ in self.items())
+        elif self.type == NodeType.ARRAY:
+            yield from self.array_iter()
+        else:
             raise ValueError(
                 f'Cannot iterate over a value of type {self.type}'
             )
 
-        if self.type == NodeType.ARRAY:
-            yield from self.children
+    def array_iter(self):
+        self.current_child = None
 
-            while True:
-                child = self.read_next_array_child(False)
+        self.file.seek(self.pos)
 
-                if child is not None:
-                    yield child
-                else:
-                    return
+        while True:
+            self.current_child = self.read_next_array_child()
 
-        elif self.type == NodeType.OBJECT:
-            yield from self.children
+            if self.current_child is not None:
+                yield self.current_child
+            else:
+                return
 
-            while True:
-                child = self.read_next_object_child(False)
-
-                if child is not None:
-                    yield self.last_key
-                else:
-                    return
-
-    def keys(self):
+    def items(self):
         if self.type != NodeType.OBJECT:
             raise ValueError(
                 f'Cannot get keys of values of type {self.type}'
             )
 
-        return iter(self)
-
-    def parse_string(self):
-        self.file.seek(self.pos)
-
-        length = self.compute_value_length()
+        self.current_child = None
 
         self.file.seek(self.pos)
 
-        string = self.peek(length)
-
-        parts = []
-
-        prev = 1
         while True:
-            backslash = string.find(b'\\', prev)
+            self.current_child = self.read_next_object_child()
 
-            if backslash == -1:
-                parts.append(string[prev:-1].decode('utf8'))
-                break
-
-            parts.append(string[prev:backslash].decode('utf8'))
-
-            next_char = string[backslash + 1:backslash + 2]
-
-            MAP = {
-                b'"': '"',
-                b'\\': '\\',
-                b'/': '/',
-                b'b': '\b',
-                b'f': '\f',
-                b'n': '\n',
-                b'r': '\r',
-                b't': '\t',
-            }
-
-            escaped = MAP.get(next_char, None)
-
-            if escaped is not None:
-                parts.append(escaped)
-            elif next_char == b'u':
-                codepoint = int(string[backslash + 2:backslash + 6], 16)
-                parts.append(chr(codepoint))
+            if self.current_child is not None:
+                yield (self.last_key, self.current_child)
             else:
-                raise ValueError(f'Unknown escaped sequence: \\{next_char}')
+                return
 
-            prev = backslash + 2
+    def read_next_array_child(self):
+        must_end = self.seek_next_child()
 
-        return ''.join(parts)
+        if must_end and self.peek(1) != ']':
+            if self.peek(1) == '':
+                raise ValueError(f'Unexpected end of file')
+            else:
+                raise ValueError(
+                    f'Unexpected input {self.peek(10)!r} inside array')
 
-    def parse_number(self):
-        length = self.compute_value_length()
+        if self.peek(1) == ']':
+            self.file.read(1)
 
-        self.file.seek(self.pos)
+            self.end = self.file.tell()
 
-        string = self.peek(length)
+            return None
 
-        return float(string)
+        return Node(self.file, self.file.tell())
+
+    def read_next_object_child(self):
+        must_end = self.seek_next_child()
+
+        if must_end and self.peek(1) != '}':
+            if self.peek(1) == '':
+                raise ValueError(f'Unexpected end of file')
+            else:
+                raise ValueError(
+                    f'Unexpected input {self.peek(10)!r} inside object')
+
+        if self.peek(1) == '}':
+            self.file.read(1)
+
+            self.end = self.file.tell()
+
+            return None
+
+        # We need to read a string. This string will not be a real node, but we
+        # treat it as such here because it greatly simplifies the code, even
+        # though it will probably use more memory than strictly needed. But its
+        # use is temporary anyway, so this shouldn't be much of a problem.
+        this_key = Node(self.file, self.file.tell())
+
+        if this_key.type != NodeType.STRING:
+            raise ValueError(f'Cannot use {this_key.type} as object key')
+
+        self.last_key = this_key.value()
+
+        self.file.seek(this_key.end_position())
+
+        if not self.skip_colon():
+            raise ValueError('Expecting a colon')
+
+        return Node(self.file, self.file.tell())
+
+    def seek_next_child(self):
+        if self.current_child is None:
+            self.file.seek(self.pos + 1)
+
+            self.skip_skippable()
+
+            return False
+        else:
+            self.file.seek(self.current_child.end_position())
+
+            return not self.skip_comma()
+
+    def __contains__(self, item):
+        if self.type == NodeType.ARRAY:
+            return any(node.equals(item) for node in self)
+        elif self.type == NodeType.OBJECT:
+            return any(key == item for key in self)
+        else:
+            raise ValueError(
+                f'Cannot iterate over a value of type {self.type}'
+            )
+
+    def equals(self, other):
+        if self.type == NodeType.ARRAY:
+            return all(left.equals(right) for left, right in zip(self, other))
+        elif self.type == NodeType.OBJECT:
+            sentinel = object()
+
+            return all(lvalue.equals(other.get(lkey, sentinel)) for lkey, lvalue in self.items())
+        else:
+            return self.value() == other
+
+    def seek_to_end(self):
+        # Force a complete iteration on the value
+        for _ in self:
+            pass
 
 
-def measure_string(file: BinaryIO, pos: int):
+def measure_string(file, pos):
     file.seek(pos + 1)  # Skip the start quote
 
     result = 1
@@ -534,11 +424,11 @@ def measure_string(file: BinaryIO, pos: int):
 
         quote_pos = 0
         while True:
-            quote_pos = buf.find(b'"', quote_pos)
+            quote_pos = buf.find('"', quote_pos)
 
             if quote_pos == -1:
                 break
-            elif buf[quote_pos - 1:quote_pos] == b'\\':
+            elif buf[quote_pos - 1] == '\\':
                 # Skip this quote
                 quote_pos += 1
 
@@ -548,28 +438,67 @@ def measure_string(file: BinaryIO, pos: int):
 
         if quote_pos == -1:
             # We did not find a quote, so we need to search longer
-            if b'\n' in buf or b'\r' in buf:
+            if '\n' in buf:
                 raise ValueError('End of line while scanning string')
 
             result += len(buf)
+
             continue
 
         break
 
     buf = buf[:quote_pos]
 
-    if b'\n' in buf or b'\r' in buf:
+    if '\n' in buf:
         raise ValueError('End of line while scanning string')
 
-    # We must include the quote in the length of the string
-    result += quote_pos + 1
+    result += len(buf) + 1
 
     return result
 
 
-def measure_number(file: BinaryIO, pos: int):
-    # Grab all valid number characters and parse the result
+def unescape_string_literal(literal):
+    parts = []
 
+    prev = 1
+    while True:
+        backslash = literal.find('\\', prev)
+
+        if backslash == -1:
+            parts.append(literal[prev:-1])
+            break
+
+        parts.append(literal[prev:backslash])
+
+        next_char = literal[backslash + 1]
+
+        escaped = ESCAPE_CHARACTERS_MAP.get(next_char, None)
+
+        if escaped is not None:
+            parts.append(escaped)
+
+            prev = backslash + 2
+        elif next_char == 'u':
+            codepoint = literal[backslash + 2:backslash + 6]
+
+            for i, c in enumerate(codepoint):
+                if c not in '0123456789abcdefABCDEF':
+                    hexadigis = codepoint[:i]
+
+                    raise ValueError(f'Truncated unicode escaped value: \\u{hexadigis}')
+
+            codepoint = int(codepoint, 16)
+
+            parts.append(chr(codepoint))
+
+            prev = backslash + 6
+        else:
+            raise ValueError(f'Unknown escaped sequence: \\{next_char}')
+
+    return ''.join(parts)
+
+
+def measure_number(file, pos):
     file.seek(pos)
 
     accumulated = []
@@ -580,14 +509,14 @@ def measure_number(file: BinaryIO, pos: int):
         # time to run
         c = file.read(1)
 
-        if c == b'':
+        if c == '':
             break
-        elif c in b'-+0123456789eE.':
+        elif c in '-+0123456789eE.':
             accumulated.append(c)
         else:
             break
 
-    accumulated = b''.join(accumulated)
+    accumulated = ''.join(accumulated)
 
     m = NUMBER_REGEX.match(accumulated)
 

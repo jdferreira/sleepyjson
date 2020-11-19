@@ -2,59 +2,64 @@ from .node import Node
 
 
 class Reader:
-    def __init__(self, file):
-        self.top_node = Node(file, 0)
+    def __init__(self, files):
+        ft = file_type(files)
 
-        self.node_positions = [0]
-        self.stream_cursor = 0
+        if ft == '':
+            self.files = iter([files])
+        elif ft == b'':
+            raise ValueError('Needs a text file')
+        else:
+            self.files = iter(files)
+
+        self.current_file = next(self.files)
+        self.next_file = False
+
+        self.node = Node(self.current_file, 0)
 
     def __getattr__(self, name: str):
-        return getattr(self.top_node, name)
+        return getattr(self.node, name)
 
     def __getitem__(self, key):
-        return self.top_node[key]
+        return self.node[key]
 
     def __len__(self):
-        return len(self.top_node)
+        return len(self.node)
 
     def __iter__(self):
-        return iter(self.top_node)
+        return iter(self.node)
 
     def next(self):
-        end = self.top_node.end_position()
+        if self.node_finishes_stream():
+            self.current_file = next(self.files)
 
-        self.top_node = Node(self.file, end + 1)
+            if file_type(self.current_file) != '':
+                raise ValueError('Needs a text file')
 
-        self.stream_cursor += 1
-        self.node_positions.append(end + 1)
+            pos = 0
+        else:
+            pos = self.node.end_position()
 
-    def prev(self):
-        if self.stream_cursor == 0:
-            raise IndexError('Reader is already at the start of the stream')
+        self.node = Node(self.current_file, pos)
 
-        self.stream_cursor -= 1
-        self.top_node = Node(self.file, self.node_positions[self.stream_cursor])
+    def jump(self, n):
+        if n < 0:
+            raise ValueError('Cannot jump a negative amount of steps')
 
-    def seek(self, index):
-        if index < 0:
-            raise IndexError('Cannot seek to negative indices')
+        for _ in range(n):
+            self.next()
 
-        if index < len(self.node_positions):
-            self.stream_cursor = index
-            self.top_node = Node(self.file, self.node_positions[self.stream_cursor])
-            return
+    def node_finishes_stream(self):
+        self.node.file.seek(self.node.end_position())
 
-        while index >= len(self.node_positions):
-            try:
-                self.next()
-            except ValueError:
-                raise IndexError('Index out of bounds')
+        self.node.skip_skippable()
 
-        return self.top_node
+        return self.node.peek(1) == ''
 
-    def finished(self):
-        self.top_node.file.seek(self.top_node.end_position())
 
-        self.top_node.skip_skippable()
+def file_type(file):
+    try:
+        return file.read(0)
+    except:
+        return False
 
-        return self.top_node.peek(1) == b''
