@@ -5,7 +5,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='sleepyjson',
-    version='0.0.1',
+    version='0.0.2',
     author='João D. Ferreira',
     author_email='jotomicron@gmail.com',
     description='Read from JSON files without having to keep everything in memory',

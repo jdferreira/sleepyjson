@@ -32,6 +32,9 @@ ESCAPE_CHARACTERS_MAP = {
 }
 
 
+STRING_BUF_LENGTH = 1024
+
+
 class NodeType(Enum):
     OBJECT = auto()
     ARRAY = auto()
@@ -412,9 +415,10 @@ def measure_string(file, pos):
     file.seek(pos + 1)  # Skip the start quote
 
     result = 1
+    prev_was_backslash = False
 
     while True:
-        buf = file.read(1024)
+        buf = file.read(STRING_BUF_LENGTH)
 
         if len(buf) == 0:
             raise ValueError('The string does not terminate')
@@ -425,7 +429,7 @@ def measure_string(file, pos):
 
             if quote_pos == -1:
                 break
-            elif buf[quote_pos - 1] == '\\':
+            elif (quote_pos == 0 and prev_was_backslash) or buf[quote_pos - 1] == '\\':
                 # Skip this quote
                 quote_pos += 1
 
@@ -439,6 +443,8 @@ def measure_string(file, pos):
                 raise ValueError('End of line while scanning string')
 
             result += len(buf)
+
+            prev_was_backslash = buf[-1] == '\\'
 
             continue
 

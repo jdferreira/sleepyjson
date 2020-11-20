@@ -1,7 +1,7 @@
 import io
 
 import pytest
-from sleepyjson.node import Node, NodeType, measure_string, measure_number
+from sleepyjson.node import Node, NodeType, measure_string, measure_number, STRING_BUF_LENGTH
 
 
 def test_nodes_are_creates_from_file_like_objects():
@@ -294,6 +294,7 @@ def test_items_not_followed_by_comma_are_the_end_of_the_container():
 
 
 def test_strings_escape_their_contents():
+    assert create_node('"\\"\\""').value() == '""'
     assert create_node('"\\r\\n"').value() == '\r\n'
     assert create_node('"Ne\\u00e9"').value() == 'Neé'
     assert create_node('"Look, a smile: 😀"').value() == 'Look, a smile: 😀'
@@ -343,3 +344,19 @@ def test_nodes_implement_equality():
 def test_nodes_implement_lazy_equality():
     assert not create_node('["red", "green" invalid').equals(['red', 'black'])
     assert not create_node('{"red": "green" invalid').equals({'red': 'black'})
+
+
+
+def test_escaped_characters_on_buffer_boundaries_are_detected():
+    # Notice that `problematic_string` is carefully crafted to ensure that there
+    # is an escaped quote character right ar the boundary of where the buffering
+    # happens: the first chunk that is read ends in a backslash and the next
+    # chunk starts with a quote character. If ever the number of charcters being
+    # read in the `measure_string` function changes, this test must be changed
+    # accordingly
+
+    problematic_string = '"' + 'x' * (STRING_BUF_LENGTH - 1) + '\\"' + 'x' * 10 + '"'
+
+    node = create_node(problematic_string)
+
+    assert node.value() == 'x' * (STRING_BUF_LENGTH - 1) + '"' + 'x' * 10
