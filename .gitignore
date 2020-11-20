@@ -1,5 +1,7 @@
 __pycache__/
 
 /.pytest_cache
-
 /tmp.json
+/build/
+/dist/
+/*.egg-info/
