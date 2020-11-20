@@ -294,8 +294,20 @@ def test_items_not_followed_by_comma_are_the_end_of_the_container():
 
 
 def test_strings_escape_their_contents():
-    create_node('"\\r\\n"').value() == '\r\n'
+    assert create_node('"\\r\\n"').value() == '\r\n'
+    assert create_node('"Ne\\u00e9"').value() == 'Neé'
+    assert create_node('"Look, a smile: 😀"').value() == 'Look, a smile: 😀'
 
+    with pytest.raises(ValueError):
+        create_node('"Invalid escape: \\ue9"').value()
+
+    with pytest.raises(ValueError):
+        create_node('"Invalid escape \\ue9 with more text"').value()
+
+
+def test_unknown_escape_characters_raise():
+    with pytest.raises(ValueError):
+        create_node('"Invalid escape \\x"').value()
 
 def test_iterating_over_nodes_works_even_if_file_cursors_changes():
     node = create_node('[0, false]')

@@ -189,9 +189,6 @@ class Node:
     def is_null(self):
         return self.type == NodeType.NULL
 
-    def is_array(self):
-        return self.type == NodeType.ARRAY
-
     def value(self):
         if self.type == NodeType.TRUE:
             return True
@@ -480,6 +477,9 @@ def unescape_string_literal(literal):
             prev = backslash + 2
         elif next_char == 'u':
             codepoint = literal[backslash + 2:backslash + 6]
+
+            if len(codepoint) != 4:
+                raise ValueError(f'Truncated unicode escaped value: \\u{codepoint}')
 
             for i, c in enumerate(codepoint):
                 if c not in '0123456789abcdefABCDEF':
