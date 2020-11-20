@@ -1,8 +1,8 @@
-# lazyjson
+# `sleepyjson`
 
 In some situations, particularly in big data scenarios, it is necessary to extract information from a JSON file without needing to read the full content into memory. For an example, see the "Example" section below.
 
-`lazyjson` provides a mechanism to deal with this scenario, where the JSON file is only parsed until the necessary information is found, and only that data is kept in memory.
+`sleepyjson` provides a mechanism to deal with this scenario, where the JSON file is only parsed until the necessary information is found, and only that data is kept in memory.
 
 Although the package provides ways to handle random access to the contents of the file, random access runs in linear time on the size of the file. In fact, the whole idea of the package is to support memory-lightweight **sequential processing** of the JSON file.
 
@@ -48,13 +48,13 @@ identifiers = [
 
 Because you're reading the full file contents into the `data` variable, the memory consumption for this snippet is quite high.
 
-With `lazyjson`, you can keep memory usage low and still achieve the same result:
+With `sleepyjson`, you can keep memory usage low and still achieve the same result:
 
 ```py
-import lazyjson
+import sleepyjson
 
 with open('data.json') as f:
-  reader = lazyjson.Reader(f)
+  reader = sleepyjson.Reader(f)
 
   identifiers = [
     item['identifier'].value()
@@ -67,19 +67,19 @@ Notice the while the memory consumption is low, time complexity is linear for mo
 
 # Comparison with `json`
 
-As you can spot in the previous snippet of code, `lazyjson` requires you to keep the file opened while you are moving within the JSON contents. This is because no content is moved into memory unless the code does so explicitly.
+As you can spot in the previous snippet of code, `sleepyjson` requires you to keep the file opened while you are moving within the JSON contents. This is because no content is moved into memory unless the code does so explicitly.
 
 Additionally, the contents of a value must be explicitly requested with the `.value()` method. *Note*: I want to change this method to something more explicit, like `materialize`, to convey the meaning that we are not simply getting the value, but actually parsing and building a JSON value, which might be costly if the value is big.
 
-The `lazyjson.Reader` class takes a file-like object, but doesn't read its contents until requested to. You can move around the file using iteration and indexation.
+The `sleepyjson.Reader` class takes a file-like object, but doesn't read its contents until requested to. You can move around the file using iteration and indexation.
 
-Also, `lazyjson.Reader` can read "JSON streams" in addition to regular JSON files. JSON streams are files that contain JSON values in succession. The reader can navigate within these files using the `.next()` method.
+Also, `sleepyjson.Reader` can read "JSON streams" in addition to regular JSON files. JSON streams are files that contain JSON values in succession. The reader can navigate within these files using the `.next()` method.
 
 ```py
 # Assuming file `data.json` contains
 # ["an", "array"] {"an": "object"}
 
-from lazyjson import Reader
+from sleepyjson import Reader
 
 with open('data.json') as f:
   reader = Reader(f)
@@ -90,11 +90,11 @@ with open('data.json') as f:
 ```
 # Partially valid JSON
 
-In case your information needs from the file do not require the file to be read until the end, `lazyjson` parses only the necessary contents from the file, which means that the file does not need to be completely valid.
+In case your information needs from the file do not require the file to be read until the end, `sleepyjson` parses only the necessary contents from the file, which means that the file does not need to be completely valid.
 
 # Comments, trailing commas
 
-Even though python's `json` package does not accept comments nor trailing commas, some popular packages elsewhere do. To support reading this "non-standard" data format, `lazyjson` understands double-slash comments and ignores trailing commas. So the following would be a valid JSON file from the point of view of this package:
+Even though python's `json` package does not accept comments nor trailing commas, some popular packages elsewhere do. To support reading this "non-standard" data format, `sleepyjson` understands double-slash comments and ignores trailing commas. So the following would be a valid JSON file from the point of view of this package:
 
 ```json
 {
@@ -219,7 +219,7 @@ There are several of these methods, each testing the type of value the node poin
 
 ### A note on key uniqueness
 
-`lazyjson` does **not** make an effort to validate that keys on objects are unique. This means that iterating over the keys of an object can produce the same key more than once; however, retrieving the actual value of a JSON object preserves only one of those key-value pairs (since the returned object is actually a python dictionary).
+`sleepyjson` does **not** make an effort to validate that keys on objects are unique. This means that iterating over the keys of an object can produce the same key more than once; however, retrieving the actual value of a JSON object preserves only one of those key-value pairs (since the returned object is actually a python dictionary).
 
 Additionally, because retrieving an item from an object stops when the key is *first* found in the file, and building the python dictionary likely preserves the *last* value associated with the key.
 

@@ -2,8 +2,8 @@ import io
 from io import StringIO
 
 import pytest
-from lazyjson.node import Node, NodeType
-from lazyjson.reader import Reader
+from sleepyjson.node import Node, NodeType
+from sleepyjson.reader import Reader
 
 TEST_CONTENT = '''
     {

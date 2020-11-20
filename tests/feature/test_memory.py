@@ -5,7 +5,7 @@ import random
 import psutil
 import pytest
 
-from lazyjson import Reader
+from sleepyjson import Reader
 
 
 def save_long_json(f, allow_comments=True, allow_trailing_comma=True):

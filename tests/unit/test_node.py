@@ -1,7 +1,7 @@
 import io
 
 import pytest
-from lazyjson.node import Node, NodeType, measure_string, measure_number
+from sleepyjson.node import Node, NodeType, measure_string, measure_number
 
 
 def test_nodes_are_creates_from_file_like_objects():
