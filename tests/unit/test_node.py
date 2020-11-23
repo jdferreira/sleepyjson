@@ -1,7 +1,8 @@
 import io
 
 import pytest
-from sleepyjson.node import Node, NodeType, measure_string, measure_number, STRING_BUF_LENGTH
+from sleepyjson.node import Node, NodeType
+from sleepyjson.parser import BUF_LENGTH
 
 
 def test_nodes_are_creates_from_file_like_objects():
@@ -40,45 +41,6 @@ def test_simple_nodes_can_consume_their_content():
     assert create_node('null').value() == None
     assert create_node('""').value() == ''
     assert create_node('12').value() == 12
-
-
-def test_measure_string():
-    def measure(text):
-        return measure_string(io.StringIO(text), 0)
-
-    assert measure('"abc"') == 5
-    assert measure('""') == 2
-    assert measure('"\\""') == 4
-    assert measure('"He said \\"Watch out\\"!"') == 24
-
-    with pytest.raises(ValueError):
-        measure('"')
-
-    with pytest.raises(ValueError):
-        measure('"New \n line"')
-
-
-def test_measure_number():
-    def measure(text):
-        return measure_number(io.StringIO(text), 0)
-
-    assert measure('3.14') == 4
-    assert measure('1000') == 4
-    assert measure('-666') == 4
-    assert measure('5e-8') == 4
-    assert measure('0.12') == 4
-    assert measure('1.1e1') == 5
-
-    # Numbers followed by other stuff
-    assert measure('1+2') == 1
-    assert measure('1e-5e') == 4
-    assert measure('0123') == 1
-
-    with pytest.raises(ValueError):
-        measure('.3.8')
-
-    with pytest.raises(ValueError):
-        measure('.123')
 
 
 def test_nodes_know_where_they_end():
@@ -355,8 +317,8 @@ def test_escaped_characters_on_buffer_boundaries_are_detected():
     # read in the `measure_string` function changes, this test must be changed
     # accordingly
 
-    problematic_string = '"' + 'x' * (STRING_BUF_LENGTH - 1) + '\\"' + 'x' * 10 + '"'
+    problematic_string = '"' + 'x' * (BUF_LENGTH - 1) + '\\"' + 'x' * 10 + '"'
 
     node = create_node(problematic_string)
 
-    assert node.value() == 'x' * (STRING_BUF_LENGTH - 1) + '"' + 'x' * 10
+    assert node.value() == 'x' * (BUF_LENGTH - 1) + '"' + 'x' * 10

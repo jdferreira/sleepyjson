@@ -50,11 +50,11 @@ class Reader:
             self.next()
 
     def node_finishes_stream(self):
-        self.node.file.seek(self.node.end_position())
+        self.node.parser.file.seek(self.node.end_position())
 
-        self.node.skip_skippable()
+        self.node.parser.skip_skippable()
 
-        return self.node.peek(1) == ''
+        return self.node.parser.peek(1) == ''
 
 
 def file_type(file):
