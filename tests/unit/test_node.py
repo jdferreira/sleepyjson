@@ -360,3 +360,20 @@ def test_escaped_characters_on_buffer_boundaries_are_detected():
     node = create_node(problematic_string)
 
     assert node.value() == 'x' * (STRING_BUF_LENGTH - 1) + '"' + 'x' * 10
+
+
+def test_quotes_at_start_of_buffer_are_correctly_handled():
+    # On measuring strings, we read the text in a buffer of specific length, and
+    # decide whether an existing quote is a termination of the string or part of
+    # the string by peeking at the character before the quote; because the quote
+    # can be at the beginning of the buffer, we must hold on to whether the last
+    # character of the previous chunk was a backslash.
+    #
+    # This test validates the code that determines if quotes at the start of the
+    # buffer terminate the string
+
+    problematic_string = '"' + ' ' * STRING_BUF_LENGTH + '"\\'
+
+    node = create_node(problematic_string)
+
+    assert node.value() == ' ' * STRING_BUF_LENGTH

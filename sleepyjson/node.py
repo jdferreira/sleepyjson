@@ -429,7 +429,7 @@ def measure_string(file, pos):
 
             if quote_pos == -1:
                 break
-            elif (quote_pos == 0 and prev_was_backslash) or buf[quote_pos - 1] == '\\':
+            elif (quote_pos == 0 and prev_was_backslash) or (quote_pos > 0 and buf[quote_pos - 1] == '\\'):
                 # Skip this quote
                 quote_pos += 1
 
